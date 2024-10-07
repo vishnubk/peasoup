@@ -9,7 +9,9 @@ struct CmdLineOptions {
   std::string killfilename;
   std::string zapfilename;
   int max_num_threads;
-  unsigned int size;
+  size_t start_sample;
+  size_t size;
+  float cdm;
   float dm_start;
   float dm_end;
   float dm_tol;
@@ -99,6 +101,10 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
 				     "upper limit on number of candidates to write out",
 				     false, 1000, "int", cmd);
 
+      TCLAP::ValueArg<size_t> arg_start_sample("", "start_sample",
+                             "The starting sample of filterbank file to read from",
+                             false, 0, "size_t", cmd);
+
       TCLAP::ValueArg<size_t> arg_size("", "fft_size",
                                        "Transform size to use (defaults to lower power of two)",
                                        false, 0, "size_t", cmd);
@@ -106,6 +112,9 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       TCLAP::ValueArg<std::string> arg_dm_file("", "dm_file",
                                           "filename with dm list",
                                           false, "none", "string", cmd);
+      TCLAP::ValueArg<float> arg_cdm("", "cdm",
+                                          "Coherent DM of filterbank file",
+                                          false, 0.0, "float", cmd);
       TCLAP::ValueArg<float> arg_dm_start("", "dm_start",
                                           "First DM to dedisperse to",
                                           false, 0.0, "float", cmd);
@@ -193,10 +202,12 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       args.zapfilename       = arg_zapfilename.getValue();
       args.max_num_threads   = arg_max_num_threads.getValue();
       args.limit             = arg_limit.getValue();
+      args.start_sample      = arg_start_sample.getValue();
       args.size              = arg_size.getValue();
       args.dm_file           = arg_dm_file.getValue();
+      args.cdm               = arg_cdm.getValue();
       args.dm_end            = arg_dm_end.getValue();
-      args.dm_start            = arg_dm_start.getValue();
+      args.dm_start          = arg_dm_start.getValue();
       args.dm_tol            = arg_dm_tol.getValue();
       args.dm_pulse_width    = arg_dm_pulse_width.getValue();
       args.host_ram_limit_gb = arg_host_ram_limit_gb.getValue();

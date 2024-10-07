@@ -261,6 +261,7 @@ public:
     std::size_t bytes_read = _filestream.gcount();
     _data.resize(bytes_read);
     set_data(_data.data());
+    std::cout << "Read " << bytes_read << " bytes" << std::endl;
     std::size_t nsamps_read = bytes_read / ( _header.nbits * _header.nchans / 8);
     std::cout << "Loaded " << nsamps_read << " samples" << std::endl;
     return nsamps_read;

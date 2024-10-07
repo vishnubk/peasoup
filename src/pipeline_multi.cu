@@ -108,12 +108,7 @@ public:
 
   void start(void)
   {
-    //Generate some timer instances for benchmarking
-    //timers["get_dm_trial"]      = Stopwatch();
-    //timers["copy_to_device"] = Stopwatch();
-    //timers["rednoise"]    = Stopwatch();
-    //timers["search"]      = Stopwatch();
-
+  
     cudaSetDevice(device);
     Stopwatch pass_timer;
     pass_timer.start();
@@ -147,7 +142,6 @@ public:
     HarmonicDistiller harm_finder(args.freq_tol,args.max_harm,false);
     AccelerationDistiller acc_still(tobs,args.freq_tol,true);
     float mean,std,rms;
-    float padding_mean;
     int ii;
 
 	PUSH_NVTX_RANGE("DM-Loop",0)
@@ -177,17 +171,14 @@ public:
       //timers["rednoise"].start()
       if (padding){
       if (args.verbose) std::cout << "Padding with zeros\n";
-            if (tim.get_nsamps() >= d_tim.get_nsamps()){
-                //NOOP
-            } else {
+            if (tim.get_nsamps() < size){
                 d_tim.fill(trials.get_nsamps(), d_tim.get_nsamps(), 0);
             }
-	    //padding_mean = stats::mean<float>(d_tim.get_data(),trials.get_nsamps());
       }
 
       if (args.verbose)
-	    std::cout << "Generating accelration list" << std::endl;
-      acc_plan.generate_accel_list(tim.get_dm(),acc_list);
+	    std::cout << "Generating acceleration list" << std::endl;
+      acc_plan.generate_accel_list(tim.get_dm(), args.cdm, acc_list);
 
       if (args.verbose)
 	    std::cout << "Searching "<< acc_list.size()<< " acceleration trials for DM "<< tim.get_dm() << std::endl;
@@ -383,7 +374,6 @@ int main(int argc, char **argv)
   if (args.size==0)
     size = Utils::prev_power_of_two(filobj.get_nsamps());
   else
-    //size = std::min(args.size,filobj.get_nsamps());
     size = args.size;
   if (args.verbose)
     std::cout << "Setting transform length to " << size << " points" << std::endl;
@@ -408,9 +398,9 @@ int main(int argc, char **argv)
     Dedisperser dedisperser(filobj, nthreads);
     dedisperser.generate_dm_list(args.dm_start, args.dm_end, args.dm_pulse_width, args.dm_tol);
     full_dm_list = dedisperser.get_dm_list();
-  }
+  } 
   else {
-      bool result = getFileContent(args.dm_file, full_dm_list);
+      getFileContent(args.dm_file, full_dm_list);
   }
 
   float nbytes = args.host_ram_limit_gb * 1e9;
@@ -434,7 +424,6 @@ int main(int argc, char **argv)
         std::cout << "Using killfile: " << args.killfilename << std::endl;
       dedisperser.set_killmask(args.killfilename);
     }
-
     dedisperser.set_dm_list(dm_list_chunk);
 
     if (args.verbose){
@@ -459,8 +448,10 @@ int main(int argc, char **argv)
     } else {
       gulp_size = args.dedisp_gulp;
     }
-
-    dedisperser.dedisperse(trials, 0, filobj.get_nsamps(), gulp_size);
+    //Segmented searches, dedisperse only what is searched
+    size_t nsamples_search = std::min(filobj.get_nsamps(), size); 
+    std::cout << "minimum_samples: " << nsamples_search << std::endl;
+    dedisperser.dedisperse(trials, args.start_sample, nsamples_search, gulp_size);
     POP_NVTX_RANGE
     timers["dedispersion"].stop();
 
@@ -534,7 +525,7 @@ int main(int argc, char **argv)
   dm_cands.cands.resize(new_size);
 
   CandidateFileWriter cand_files(args.outdir);
-  cand_files.write_binary(dm_cands.cands,"candidates.peasoup");
+  //cand_files.write_binary(dm_cands.cands,"candidates.peasoup");
 
   OutputFileWriter stats;
   stats.add_misc_info();
@@ -543,8 +534,8 @@ int main(int argc, char **argv)
   stats.add_dm_list(full_dm_list);
 
   std::vector<float> acc_list;
-  acc_plan.generate_accel_list(0.0,acc_list);
-  stats.add_acc_list(acc_list);
+  acc_plan.generate_accel_list(args.cdm, args.cdm, acc_list);
+  stats.add_acc_list(acc_list, args.cdm);
 
   std::vector<int> device_idxs;
   for (int device_idx=0;device_idx<nthreads;device_idx++)

@@ -116,13 +116,12 @@ public:
                 << gulp << " bytes"<< std::endl;
     }
 
-    if ((start_sample + nsamps) > filterbank.get_nsamps())
-    {
-      nsamps = filterbank.get_nsamps() - start_sample;
-      std::cerr << "WARNING: Number of sample requested exceeds input filterbank length "
-                << "revising to " << nsamps << " samples" << std::endl;
-    }
-
+    // if ((start_sample + nsamps) > filterbank.get_nsamps())
+    // {
+    //   nsamps = filterbank.get_nsamps();
+    //   std::cerr << "WARNING: Number of sample requested exceeds input filterbank length "
+    //             << "revising to " << nsamps << " samples" << std::endl;
+    // }
     // Calculated the total number of output samples expected
     std::size_t total_out_nsamps = nsamps - max_delay;
     std::cout << "Total Dedisp output samples: " << total_out_nsamps << std::endl;
@@ -134,12 +133,13 @@ public:
     trials.resize(total_out_nsamps, dm_list);
     //std::cout << "Trials post size " << trials.get_data().size() << std::endl;
     //std::cout << "Count " << trials.get_count() << " nsamps " << trials.get_nsamps() << std::endl;
-
+    //Vishnu notes, change the while loop tomorrow
     while (start_sample < total_out_nsamps)
     {
       std::cout << "Dedispersing samples " << start_sample
 	        << " to " << start_sample + gulp << " of "
                 << total_out_nsamps << std::endl;
+      
       // Load a block of data from the filterbank
       std::size_t loaded_samples = filterbank.load_gulp(start_sample, gulp);
       if (loaded_samples == 0)
@@ -156,7 +156,7 @@ public:
       if (dedisp_samples + start_sample > total_out_nsamps){
         nsamps_to_copy = total_out_nsamps - start_sample;
       } else {
- 	nsamps_to_copy = dedisp_samples;
+ 	    nsamps_to_copy = dedisp_samples;
       }
       // Resize the temporary buffer to handle the output of the next dedisp call
       temp_buffer.resize(gulp * dm_list.size());
@@ -170,7 +170,7 @@ public:
           reinterpret_cast<unsigned char*>(temp_buffer.data()),
           32, // Float output
           (unsigned) 0);
-      ErrorChecker::check_dedisp_error(error,"execute");
+      ErrorChecker::check_dedisp_error(error,"dedisp execute error");
 
       // Get a pointer to the final trials data
       std::vector<float> const& data = trials.get_data();

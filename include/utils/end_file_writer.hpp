@@ -60,7 +60,9 @@ public:
     search_options.append(XML::Element("killfilename",args.killfilename));
     search_options.append(XML::Element("zapfilename",args.zapfilename));
     search_options.append(XML::Element("max_num_threads",args.max_num_threads));
+    search_options.append(XML::Element("start_sample",args.start_sample));
     search_options.append(XML::Element("size",args.size));
+    search_options.append(XML::Element("cdm",args.cdm));
     search_options.append(XML::Element("dm_start",args.dm_start));
     search_options.append(XML::Element("dm_end",args.dm_end));
     search_options.append(XML::Element("dm_tol",args.dm_tol));
