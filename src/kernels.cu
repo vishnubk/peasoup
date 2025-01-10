@@ -31,9 +31,10 @@
 //--------------Harmonic summing----------------//
 
 /* Unwrapped for 3x speed increase */
+//Changed rounding and hardcoding sqrt constants based on Ewan's snippet, avoiding double precision values that were not needed. 10 Jan 2024
 __global__
 void harmonic_sum_kernel(float *d_idata, float **d_odata,
-			 size_t size, unsigned nharms)
+             size_t size, unsigned nharms)
 
 {
   for( int idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
@@ -41,60 +42,60 @@ void harmonic_sum_kernel(float *d_idata, float **d_odata,
       float val = d_idata[idx];
 
       if (nharms>0)
-	{
-      	  val += d_idata[(int) (idx*0.5 + 0.5)];
-	  d_odata[0][idx] = val*rsqrt(2.0);
-	}
+    {
+      val += d_idata[__float2int_rn(idx*0.5f)];
+      d_odata[0][idx] = val * 0.7071067811865475f;
+    }
 
       if (nharms>1)
-	{
-	  val += d_idata[(int) (idx * 0.75 + 0.5)];
-	  val += d_idata[(int) (idx * 0.25 + 0.5)];
-	  d_odata[1][idx] = val*0.5;
-	}
+    {
+      val += d_idata[__float2int_rn(idx * 0.75f)];
+      val += d_idata[__float2int_rn(idx * 0.25f)];
+      d_odata[1][idx] = val * 0.5f;
+    }
 
       if (nharms>2)
-	{
-	  val += d_idata[(int) (idx * 0.125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.375 + 0.5)];
-	  val += d_idata[(int) (idx * 0.625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.875 + 0.5)];
-	  d_odata[2][idx] = val*rsqrt(8.0);
-	}
+    {
+      val += d_idata[__float2int_rn(idx * 0.125f)];
+      val += d_idata[__float2int_rn(idx * 0.375f)];
+      val += d_idata[__float2int_rn(idx * 0.625f)];
+      val += d_idata[__float2int_rn(idx * 0.875f)];
+      d_odata[2][idx] = val * 0.35355339059327373f;
+    }
 
       if (nharms>3)
-	{
-	  val += d_idata[(int) (idx * 0.0625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.1875 + 0.5)];
-	  val += d_idata[(int) (idx * 0.3125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.4375 + 0.5)];
-	  val += d_idata[(int) (idx * 0.5625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.6875 + 0.5)];
-	  val += d_idata[(int) (idx * 0.8125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.9375 + 0.5)];
-	  d_odata[3][idx] = val*0.25;
-	}
+    {
+      val += d_idata[__float2int_rn(idx * 0.0625f)];
+      val += d_idata[__float2int_rn(idx * 0.1875f)];
+      val += d_idata[__float2int_rn(idx * 0.3125f)];
+      val += d_idata[__float2int_rn(idx * 0.4375f)];
+      val += d_idata[__float2int_rn(idx * 0.5625f)];
+      val += d_idata[__float2int_rn(idx * 0.6875f)];
+      val += d_idata[__float2int_rn(idx * 0.8125f)];
+      val += d_idata[__float2int_rn(idx * 0.9375f)];
+      d_odata[3][idx] = val * 0.25f;
+    }
 
       if (nharms>4)
-	{
-	  val += d_idata[(int) (idx * 0.03125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.09375 + 0.5)];
-	  val += d_idata[(int) (idx * 0.15625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.21875 + 0.5)];
-	  val += d_idata[(int) (idx * 0.28125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.34375 + 0.5)];
-	  val += d_idata[(int) (idx * 0.40625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.46875 + 0.5)];
-	  val += d_idata[(int) (idx * 0.53125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.59375 + 0.5)];
-	  val += d_idata[(int) (idx * 0.65625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.71875 + 0.5)];
-	  val += d_idata[(int) (idx * 0.78125 + 0.5)];
-	  val += d_idata[(int) (idx * 0.84375 + 0.5)];
-	  val += d_idata[(int) (idx * 0.90625 + 0.5)];
-	  val += d_idata[(int) (idx * 0.96875 + 0.5)];
-	  d_odata[4][idx] = val*rsqrt(32.0);
-	}
+    {
+      val += d_idata[__float2int_rn(idx * 0.03125f)];
+      val += d_idata[__float2int_rn(idx * 0.09375f)];
+      val += d_idata[__float2int_rn(idx * 0.15625f)];
+      val += d_idata[__float2int_rn(idx * 0.21875f)];
+      val += d_idata[__float2int_rn(idx * 0.28125f)];
+      val += d_idata[__float2int_rn(idx * 0.34375f)];
+      val += d_idata[__float2int_rn(idx * 0.40625f)];
+      val += d_idata[__float2int_rn(idx * 0.46875f)];
+      val += d_idata[__float2int_rn(idx * 0.53125f)];
+      val += d_idata[__float2int_rn(idx * 0.59375f)];
+      val += d_idata[__float2int_rn(idx * 0.65625f)];
+      val += d_idata[__float2int_rn(idx * 0.71875f)];
+      val += d_idata[__float2int_rn(idx * 0.78125f)];
+      val += d_idata[__float2int_rn(idx * 0.84375f)];
+      val += d_idata[__float2int_rn(idx * 0.90625f)];
+      val += d_idata[__float2int_rn(idx * 0.96875f)];
+      d_odata[4][idx] = val * 0.17677669529663687f;
+    }
     }
   return;
 }
