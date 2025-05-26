@@ -264,11 +264,6 @@ public:
     char actualpath [PATH_MAX];
     std::stringstream filepath;
     filepath << output_dir << "/" << filename;
-
-    if (realpath(filepath.str().c_str(), actualpath) == NULL) {
-        perror("realpath failed");
-        return;
-    }
         
     FILE* fo = fopen(actualpath,"w");
     if (fo == NULL) {
@@ -295,6 +290,11 @@ public:
 	fwrite(&detections[0],sizeof(CandidatePOD),ndets,fo);
       }
     fclose(fo);
+
+    if (realpath(filepath.str().c_str(), actualpath) == NULL) {
+        perror("Binary candidate file realpath error");
+        return;
+    }
   }
   
   void write_binaries(std::vector<Candidate>& candidates)

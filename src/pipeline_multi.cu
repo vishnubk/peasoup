@@ -14,6 +14,7 @@
 #include <transforms/distiller.hpp>
 #include <transforms/harmonicfolder.hpp>
 #include <transforms/scorer.hpp>
+#include <transforms/template_bank_reader.hpp>
 #include <utils/exceptions.hpp>
 #include <utils/utils.hpp>
 #include <utils/stats.hpp>
@@ -32,6 +33,8 @@
 #include <cmath>
 #include <filesystem>
 #include <map>
+#include <optional>
+
 
 typedef float DedispOutputType;
 
@@ -94,18 +97,103 @@ private:
   unsigned int size;
   int device;
   std::map<std::string,Stopwatch> timers;
+  std::optional<Keplerian_TemplateBank_Reader>& keplerian_tb;
+
+  void preprocess_time_series(DedispersedTimeSeries<DedispOutputType>& tim,
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim) {
+        if (args.verbose) {
+            std::cout << "Copying time series to device (DM=" << tim.get_dm() << ")\n";
+            std::cout << "Transferring " << tim.get_nsamps() << " samples\n";
+        }
+        d_tim.copy_from_host(tim);
+        if (args.verbose) std::cout << "Copy from host complete\n";
+        if (args.verbose) std::cout << "Removing baseline\n";
+        d_tim.remove_baseline(std::min(tim.get_nsamps(), d_tim.get_nsamps()));
+        if (args.verbose) std::cout << "Baseline removed\n";
+        if (size > tim.get_nsamps()) {
+            if (args.verbose) std::cout << "Padding with zeros\n";
+            d_tim.fill(tim.get_nsamps(), d_tim.get_nsamps(), 0);
+        }
+        if (args.verbose) std::cout << "Preprocessing done\n";
+    }
+  // 2) FFT -> rednoise + zap + stats
+
+  void remove_rednoise_and_zap(ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    CuFFTerR2C& r2cfft,
+    CuFFTerC2R& c2rfft,
+    DeviceFourierSeries<cufftComplex>& d_fseries,
+    DevicePowerSpectrum<float>& d_pspec,
+    Dereddener& rednoise,
+    Zapper* bzap,
+    SpectrumFormer& former,
+    float& mean, float& rms, float& std) {
+
+    if (args.verbose) std::cout << "Executing forward FFT\n";
+    r2cfft.execute(d_tim.get_data(), d_fseries.get_data());
+    if (args.verbose) std::cout << "Forming power spectrum\n";
+    former.form(d_fseries, d_pspec);
+    if (args.verbose) std::cout << "Calculating running median\n";
+    rednoise.calculate_median(d_pspec);
+    if (args.verbose) std::cout << "Dereddening Fourier series\n";
+    rednoise.deredden(d_fseries);
+    if (bzap) {
+        if (args.verbose) std::cout << "Zapping birdies\n";
+        bzap->zap(d_fseries);
+    }
+    if (args.verbose) std::cout << "Forming interpolated spectrum\n";
+    former.form_interpolated(d_fseries, d_pspec);
+    if (args.verbose) std::cout << "Computing stats\n";
+    //stats::stats<float>(d_pspec.get_data(), d_pspec.get_nbins(), &mean, nullptr, &std);
+    //Check later if d_pspec.get_nbins() = size/2+1 (should be true)
+    stats::stats<float>(d_pspec.get_data(), size/2+1, &mean, &rms, &std);
+    if (args.verbose) std::cout << "Inverse FFT\n";
+    c2rfft.execute(d_fseries.get_data(), d_tim.get_data());
+    if (args.verbose) std::cout << "Rednoise removal and zapping complete\n";
+
+    }
+
+void run_search_and_find_candidates(DeviceTimeSeries<float>& d_tim_resampled,
+    CuFFTerR2C& r2cfft,
+    CuFFTerC2R& c2rfft,
+    DeviceFourierSeries<cufftComplex>& d_fseries,
+    DevicePowerSpectrum<float>& d_pspec,
+    SpectrumFormer& former,
+    HarmonicSums<float>& sums,
+    HarmonicFolder& harm_folder,
+    PeakFinder& cand_finder,
+    HarmonicDistiller& harm_finder,
+    SpectrumCandidates& trial_cands,
+    CandidateCollection& output_cands,
+    float mean, float std, unsigned int size) {
+
+    if (args.verbose) std::cout << "Executing forward FFT\n";
+    r2cfft.execute(d_tim_resampled.get_data(), d_fseries.get_data());
+    if (args.verbose) std::cout << "Forming interpolated power spectrum\n";
+    former.form_interpolated(d_fseries, d_pspec);
+    if (args.verbose) std::cout << "Normalising power spectrum\n";
+    stats::normalise(d_pspec.get_data(), mean * size, std * size, size / 2 + 1);
+    if (args.verbose) std::cout << "Harmonic summing\n";
+    harm_folder.fold(d_pspec);
+    if (args.verbose) std::cout << "Finding peaks\n";
+    cand_finder.find_candidates(d_pspec, trial_cands);
+    cand_finder.find_candidates(sums, trial_cands);
+    if (args.verbose) std::cout << "Distilling harmonics\n";
+    output_cands.append(harm_finder.distill(trial_cands.cands));
+}
 
 public:
   CandidateCollection dm_trial_cands;
 
   Worker(DispersionTrials<DedispOutputType>& trials, DMDispenser& manager,
-	 AccelerationPlan& acc_plan, CmdLineOptions& args, unsigned int size, int device)
+	 AccelerationPlan& acc_plan, CmdLineOptions& args, unsigned int size, int device,
+         std::optional<Keplerian_TemplateBank_Reader>& keplerian_tb)
     :trials(trials)
     ,manager(manager)
     ,acc_plan(acc_plan)
     ,args(args)
     ,size(size)
     ,device(device)
+    ,keplerian_tb(keplerian_tb)
   {}
 
   void start(void)
@@ -115,183 +203,74 @@ public:
     Stopwatch pass_timer;
     pass_timer.start();
 
-
-    bool padding = false;
-    if (size > trials.get_nsamps())
-      padding = true;
-
-
     CuFFTerR2C r2cfft(size);
     CuFFTerC2R c2rfft(size);
     float tobs = size*trials.get_tsamp();
     float bin_width = 1.0/tobs;
     DeviceFourierSeries<cufftComplex> d_fseries(size/2+1,bin_width);
     DedispersedTimeSeries<DedispOutputType> tim;
-
-   
     ReusableDeviceTimeSeries<float, DedispOutputType> d_tim(size);
-    DeviceTimeSeries<float> d_tim_r(size);
-    TimeDomainResampler resampler;
-    DevicePowerSpectrum<float> pspec(d_fseries);
-    Zapper* bzap;
-    if (args.zapfilename!=""){
-      if (args.verbose)
-	      std::cout << "Using zapfile: " << args.zapfilename << std::endl;
-      bzap = new Zapper(args.zapfilename);
-    }
+    DeviceTimeSeries<float> d_tim_resampled(size);
+    DevicePowerSpectrum<float> d_pspec(d_fseries);
     Dereddener rednoise(size/2+1);
     SpectrumFormer former;
     PeakFinder cand_finder(args.min_snr,args.min_freq,args.max_freq,size);
-    HarmonicSums<float> sums(pspec,args.nharmonics);
+    HarmonicSums<float> sums(d_pspec,args.nharmonics);
     HarmonicFolder harm_folder(sums);
-    std::vector<float> acc_list;
     HarmonicDistiller harm_finder(args.freq_tol,args.max_harm,false);
-    AccelerationDistiller acc_still(tobs,args.freq_tol,true);
     float mean,std,rms;
-    //float padding_mean;
-    int ii;
+    int idx;
+
+    // Set up zapper if requested
+    Zapper* bzap = nullptr; 
+    if (!args.zapfilename.empty()) {            
+        if (args.verbose) 
+          std::cout << "Using zapfile: " << args.zapfilename << "\n";
+        bzap = new Zapper(args.zapfilename);      // create it only then
+      }
+    // if (args.zapfilename!=""){
+    //   if (args.verbose)
+	//       std::cout << "Using zapfile: " << args.zapfilename << std::endl;
+    //   bzap = new Zapper(args.zapfilename);
+    // }
+
+    TimeDomainResampler resampler;
+    std::vector<float> acc_list;
+    AccelerationDistiller acc_still(tobs,args.freq_tol,true);
+
+
 
 	PUSH_NVTX_RANGE("DM-Loop",0)
-    while (true){
-      ii = manager.get_dm_trial_idx();
+    while (true) {
+        idx = manager.get_dm_trial_idx();
+        trials.get_idx(idx, tim, size);
+        if (idx == -1) break;
+        //Start processing
+        preprocess_time_series(tim, d_tim);
+        remove_rednoise_and_zap(d_tim, r2cfft, c2rfft, d_fseries, d_pspec, rednoise, bzap, former, mean, rms, std);
+        
+        // Acceleration search only
 
-      if (ii==-1)
-        break;
-      //tim.set_nsamps(size);
-      trials.get_idx(ii, tim, size);
+        if (args.verbose) std::cout << "Generating acceleration list" << std::endl;
+        acc_plan.generate_accel_list(tim.get_dm(), args.cdm, acc_list);
 
-      if (args.verbose)
-      {
-          std::cout << "Copying DM trial to device (DM: " << tim.get_dm() << ")"<< std::endl;
-          std::cout << "Transferring " << tim.get_nsamps() << " samples" << std::endl;
-      }
-     
-      //Utils::dump_host_buffer<float>(tim.get_data(), tim.get_nsamps(), "raw_timeseries_before_baseline_removal_host.dump");
-      d_tim.copy_from_host(tim);
-      if (args.verbose) std::cout << "Copy from host complete\n";
-      //Utils::dump_device_buffer<float>(d_tim.get_data(), d_tim.get_nsamps(), "raw_timeseries_before_baseline_removal.dump");
-      if (args.verbose) std::cout << "Removing baseline\n";
-      d_tim.remove_baseline(std::min(tim.get_nsamps(), d_tim.get_nsamps()));
-      if (args.verbose) std::cout << "Baseline removed\n";
-      //Utils::dump_device_buffer<float>(d_tim.get_data(), d_tim.get_nsamps(), "raw_timeseries_after_baseline_removal.dump");
-      
-      //timers["rednoise"].start()
-      if (padding){
-      if (args.verbose) std::cout << "Padding with zeros\n";
-            if (tim.get_nsamps() >= d_tim.get_nsamps()){
-                //NOOP
-            } else {
-                //The data already has zero mean, given baseline subtraction, so adding zero here is okay.
-                d_tim.fill(trials.get_nsamps(), d_tim.get_nsamps(), 0);
-            }
-      }
+        if (args.verbose) std::cout << "Searching "<< acc_list.size()<< " acceleration trials for DM "<< tim.get_dm() << std::endl;
 
-      if (args.verbose)
-	    std::cout << "Generating accelration list" << std::endl;
-      acc_plan.generate_accel_list(tim.get_dm(), args.cdm, acc_list);
+        CandidateCollection accel_search_cands;
+        PUSH_NVTX_RANGE("Acceleration-Loop",1)
 
-      if (args.verbose)
-	    std::cout << "Searching "<< acc_list.size()<< " acceleration trials for DM "<< tim.get_dm() << std::endl;
-
-      //Utils::dump_device_buffer<float>(d_tim.get_data(), d_tim.get_nsamps(), "raw_timeseries_after_padding_beg.dump");
-     
-
-      if (args.verbose)
-	    std::cout << "Executing forward FFT" << std::endl;
-      r2cfft.execute(d_tim.get_data(),d_fseries.get_data());
-
-      //Utils::dump_device_buffer<cufftComplex>(d_fseries.get_data(), d_fseries.get_nbins(), "fourier_series.dump");
-
-      if (args.verbose)
-	    std::cout << "Forming power spectrum" << std::endl;
-      former.form(d_fseries,pspec);
-
-      //Utils::dump_device_buffer<float>(pspec.get_data(), pspec.get_nbins(), "power_spec.dump");
-
-      if (args.verbose)
-	    std::cout << "Finding running median" << std::endl;
-      rednoise.calculate_median(pspec);
-
-      if (args.verbose)
-	    std::cout << "Dereddening Fourier series" << std::endl;
-      rednoise.deredden(d_fseries);
-
-      //Utils::dump_device_buffer<cufftComplex>(d_fseries.get_data(), d_fseries.get_nbins(), "deredden_fourier_series.dump");
-
-
-      if (args.zapfilename!=""){
-	    if (args.verbose)
-	      std::cout << "Zapping birdies" << std::endl;
-	    bzap->zap(d_fseries);
-      }
-
-      if (args.verbose)
-	    std::cout << "Forming interpolated power spectrum" << std::endl;
-      former.form_interpolated(d_fseries,pspec);
-
-      if (args.verbose)
-	    std::cout << "Finding statistics" << std::endl;
-      stats::stats<float>(pspec.get_data(),size/2+1,&mean,&rms,&std);
-
-      if (args.verbose)
-	    std::cout << "Executing inverse FFT" << std::endl;
-      c2rfft.execute(d_fseries.get_data(),d_tim.get_data());
-
-      //Utils::dump_device_buffer<float>(d_tim.get_data(), d_tim.get_nsamps(), "deredden_ifft.dump");
-
-
-      CandidateCollection accel_trial_cands;
-      PUSH_NVTX_RANGE("Acceleration-Loop",1)
-
-      for (int jj=0;jj<acc_list.size();jj++){
-  	    if (args.verbose)
-  	      std::cout << "Resampling to "<< acc_list[jj] << " m/s/s" << std::endl;
-  	    resampler.resampleII(d_tim,d_tim_r,size,acc_list[jj]);
-
-        //Utils::dump_device_buffer<float>(d_tim_r.get_data(), d_tim_r.get_nsamps(), "resampler_out.dump");
-
-
-  	    if (args.verbose)
-  	      std::cout << "Execute forward FFT" << std::endl;
-  	    r2cfft.execute(d_tim_r.get_data(),d_fseries.get_data());
-
-        //Utils::dump_device_buffer<cufftComplex>(d_fseries.get_data(), d_fseries.get_nbins(), "search_fourier_series.dump");
-
-
-  	    if (args.verbose)
-  	      std::cout << "Form interpolated power spectrum" << std::endl;
-  	    former.form_interpolated(d_fseries,pspec);
-
-        //Utils::dump_device_buffer<float>(pspec.get_data(), pspec.get_nbins(), "search_power_spec.dump");
-
-
-
-  	    if (args.verbose)
-  	      std::cout << "Normalise power spectrum" << std::endl;
-  	    stats::normalise(pspec.get_data(),mean*size,std*size,size/2+1);
-
-        //Utils::dump_device_buffer<float>(pspec.get_data(), pspec.get_nbins(), "search_normalised_power_spec.dump");
-
-
-
-  	    if (args.verbose)
-  	      std::cout << "Harmonic summing" << std::endl;
-  	    harm_folder.fold(pspec);
-
-  	    if (args.verbose)
-  	      std::cout << "Finding peaks" << std::endl;
-  	    SpectrumCandidates trial_cands(tim.get_dm(),ii,acc_list[jj]);
-  	    cand_finder.find_candidates(pspec,trial_cands);
-  	    cand_finder.find_candidates(sums,trial_cands);
-
-  	    if (args.verbose)
-  	      std::cout << "Distilling harmonics" << std::endl;
-  	      accel_trial_cands.append(harm_finder.distill(trial_cands.cands));
-      }
-	  POP_NVTX_RANGE
-      if (args.verbose)
-	    std::cout << "Distilling accelerations" << std::endl;
-      dm_trial_cands.append(acc_still.distill(accel_trial_cands.cands));
+        for (int jj=0;jj<acc_list.size();jj++){
+            if (args.verbose) std::cout << "Resampling to "<< acc_list[jj] << " m/s/s" << std::endl;
+            resampler.resampleII(d_tim,d_tim_resampled,size,acc_list[jj]);
+            SearchParams accel_search;
+            accel_search.acc = acc_list[jj];
+  	        SpectrumCandidates trial_cands(tim.get_dm(),idx,accel_search);
+            run_search_and_find_candidates(d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former, sums, harm_folder, cand_finder,
+                harm_finder, trial_cands, accel_search_cands, mean, std, size);    
+        }
+	    POP_NVTX_RANGE
+        if (args.verbose) std::cout << "Distilling accelerations" << std::endl;
+        dm_trial_cands.append(acc_still.distill(accel_search_cands.cands));
     }
 	POP_NVTX_RANGE
 
@@ -419,6 +398,23 @@ int main(int argc, char **argv)
     filobj.get_cfreq() * 1e6, // from header in MHz needs converted to Hz
     filobj.get_foff() * 1e6 // from header in MHz needs converted to Hz
     );
+ 
+  std::optional<Keplerian_TemplateBank_Reader> keplerian_tb;
+
+  if (args.keplerian_tb_file != "none") {
+    if (args.verbose)
+        std::cout << "Using template bank file: " << args.keplerian_tb_file << std::endl;
+
+    keplerian_tb.emplace(args.keplerian_tb_file);
+
+    // Print first 5 values of n
+    const auto& n_vals = keplerian_tb->get_n();
+    std::cout << "First 5 values of n: ";
+    for (size_t i = 0; i < std::min(n_vals.size(), size_t(5)); ++i)
+        std::cout << n_vals[i] << " ";
+    std::cout << std::endl;
+}
+  
 
 
   if (args.verbose)
@@ -495,6 +491,7 @@ int main(int argc, char **argv)
 
     //Multithreading commands
     timers["searching"].start();
+    
     std::vector<Worker*> workers(nthreads);
     std::vector<pthread_t> threads(nthreads);
 
@@ -502,12 +499,9 @@ int main(int argc, char **argv)
     if (args.progress_bar)
       dispenser.enable_progress_bar();
 
-    // if args.timeseries_dump_dir is not empty, write the time series to file
-
-    std::cout << "Dumping time series to " << args.timeseries_dump_dir << std::endl;
-    std::cout << "filename without ext: " << filpath.stem().string() << std::endl;
-
     if (args.timeseries_dump_dir != ""){
+      std::cout << "Dumping time series to " << args.timeseries_dump_dir << std::endl;
+      std::cout << "filename without ext: " << filpath.stem().string() << std::endl;
       std::filesystem::create_directories(args.timeseries_dump_dir);
       for (int ii=0;ii<dm_list_chunk.size();ii++){
         trials.write_timeseries_to_file(args.timeseries_dump_dir, filpath.stem().string(), ii, header);
@@ -521,7 +515,7 @@ int main(int argc, char **argv)
    
     
     for (int ii=0;ii<nthreads;ii++){
-      workers[ii] = (new Worker(trials,dispenser,acc_plan,args,size,ii));
+      workers[ii] = (new Worker(trials,dispenser,acc_plan,args,size,ii,keplerian_tb));
       pthread_create(&threads[ii], NULL, launch_worker_thread, (void*) workers[ii]);
     }
 
