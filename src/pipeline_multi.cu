@@ -152,6 +152,7 @@ private:
 
     }
 
+  
 void run_search_and_find_candidates(DeviceTimeSeries<float>& d_tim_resampled,
     CuFFTerR2C& r2cfft,
     CuFFTerC2R& c2rfft,
@@ -179,6 +180,57 @@ void run_search_and_find_candidates(DeviceTimeSeries<float>& d_tim_resampled,
     cand_finder.find_candidates(sums, trial_cands);
     if (args.verbose) std::cout << "Distilling harmonics\n";
     output_cands.append(harm_finder.distill(trial_cands.cands));
+}
+
+void run_acceleration_time_domain_resampler(
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled,
+    float acc, unsigned int size) {
+    if (args.verbose) std::cout << "Resampling to " << acc << " m/s/s\n";
+    TimeDomainResampler resampler;
+    resampler.resampleII(d_tim, d_tim_resampled, size, acc);
+    if (args.verbose) std::cout << "Resampling complete\n"; 
+}
+
+
+
+void run_acceleration_search(int idx,
+    AccelerationPlan& acc_plan,
+    CandidateCollection& accel_search_cands,
+    std::vector<float>& acc_list,
+    DedispersedTimeSeries<DedispOutputType>& tim,
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled,
+    CuFFTerR2C& r2cfft,
+    CuFFTerC2R& c2rfft,
+    DeviceFourierSeries<cufftComplex>& d_fseries,
+    DevicePowerSpectrum<float>& d_pspec,
+    SpectrumFormer& former,
+    HarmonicSums<float>& sums,
+    HarmonicFolder& harm_folder,
+    PeakFinder& cand_finder,
+    HarmonicDistiller& harm_finder,
+    float mean, float std, unsigned int size
+)
+{
+    if (args.verbose) std::cout << "Generating acceleration list\n";
+    acc_plan.generate_accel_list(tim.get_dm(), args.cdm, acc_list);
+    if (args.verbose) std::cout << "Searching " << acc_list.size() << " acceleration trials for DM " << tim.get_dm() << "\n";
+    
+    PUSH_NVTX_RANGE("Acceleration-Loop",1)
+
+    for (int jj = 0; jj < acc_list.size(); jj++) {
+        if (args.verbose) std::cout << "Resampling to " << acc_list[jj] << " m/s/s\n";
+        run_acceleration_time_domain_resampler(d_tim, d_tim_resampled, acc_list[jj], size);
+        SearchParams accel_search;
+        accel_search.acc = acc_list[jj];
+        SpectrumCandidates trial_cands(tim.get_dm(), idx, accel_search);
+        run_search_and_find_candidates(
+            d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+            sums, harm_folder, cand_finder, harm_finder, trial_cands,
+            accel_search_cands, mean, std, size);
+    }
+    POP_NVTX_RANGE
 }
 
 public:
@@ -226,15 +278,9 @@ public:
     if (!args.zapfilename.empty()) {            
         if (args.verbose) 
           std::cout << "Using zapfile: " << args.zapfilename << "\n";
-        bzap = new Zapper(args.zapfilename);      // create it only then
+        bzap = new Zapper(args.zapfilename);     
       }
-    // if (args.zapfilename!=""){
-    //   if (args.verbose)
-	//       std::cout << "Using zapfile: " << args.zapfilename << std::endl;
-    //   bzap = new Zapper(args.zapfilename);
-    // }
-
-    TimeDomainResampler resampler;
+    
     std::vector<float> acc_list;
     AccelerationDistiller acc_still(tobs,args.freq_tol,true);
 
@@ -249,26 +295,14 @@ public:
         preprocess_time_series(tim, d_tim);
         remove_rednoise_and_zap(d_tim, r2cfft, c2rfft, d_fseries, d_pspec, rednoise, bzap, former, mean, rms, std);
         
-        // Acceleration search only
-
-        if (args.verbose) std::cout << "Generating acceleration list" << std::endl;
-        acc_plan.generate_accel_list(tim.get_dm(), args.cdm, acc_list);
-
-        if (args.verbose) std::cout << "Searching "<< acc_list.size()<< " acceleration trials for DM "<< tim.get_dm() << std::endl;
-
         CandidateCollection accel_search_cands;
-        PUSH_NVTX_RANGE("Acceleration-Loop",1)
+        
+        // Acceleration search only
+        run_acceleration_search(
+            idx, acc_plan, accel_search_cands, acc_list, tim, d_tim, d_tim_resampled, r2cfft, c2rfft,
+            d_fseries, d_pspec, former, sums, harm_folder, cand_finder,
+            harm_finder, mean, std, size);
 
-        for (int jj=0;jj<acc_list.size();jj++){
-            if (args.verbose) std::cout << "Resampling to "<< acc_list[jj] << " m/s/s" << std::endl;
-            resampler.resampleII(d_tim,d_tim_resampled,size,acc_list[jj]);
-            SearchParams accel_search;
-            accel_search.acc = acc_list[jj];
-  	        SpectrumCandidates trial_cands(tim.get_dm(),idx,accel_search);
-            run_search_and_find_candidates(d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former, sums, harm_folder, cand_finder,
-                harm_finder, trial_cands, accel_search_cands, mean, std, size);    
-        }
-	    POP_NVTX_RANGE
         if (args.verbose) std::cout << "Distilling accelerations" << std::endl;
         dm_trial_cands.append(acc_still.distill(accel_search_cands.cands));
     }
@@ -555,7 +589,7 @@ int main(int argc, char **argv)
   dm_cands.cands.resize(new_size);
 
   CandidateFileWriter cand_files(args.outdir);
-  cand_files.write_binary(dm_cands.cands,"candidates.peasoup");
+  //cand_files.write_binary(dm_cands.cands,"candidates.peasoup");
 
   OutputFileWriter stats;
   stats.add_misc_info();

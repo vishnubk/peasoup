@@ -22,3 +22,4 @@ obj/
 test_dm_file.txt
 sample_dm_file.txt
 src/backup_pipeline_multi.cu
+src/backup_pipeline_multi1.cu
