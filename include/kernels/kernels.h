@@ -131,6 +131,12 @@ void device_resampleII(float * d_idata,
                      unsigned int block_size,
                      unsigned int max_blocks);
 
+void device_circular_orbit_resampler(float * d_idata, 
+                                    float * d_odata, 
+                                    double n, double a1, double phi, double zero_offset, double tsamp, double inverse_tsamp,  
+                                    size_t size, unsigned int max_threads, unsigned int max_blocks);
+
+
 int device_find_peaks(int n,
 		      int start_index,
 		      float * d_dat,

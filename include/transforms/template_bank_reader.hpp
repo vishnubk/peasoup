@@ -14,6 +14,7 @@ private:
   std::vector<double> phi;                // orbital phase
   std::vector<double> omega;              // longitude of periastron
   std::vector<double> ecc;                // eccentricity
+  int columns = 0;
 
   static bool is_comment(const std::string& line) {
     return !line.empty() && line[0] == '#';
@@ -36,6 +37,7 @@ public:
     while (std::getline(in, line)) {
       if (is_comment(line)) continue;
       auto tokens = split(line);
+      if (columns == 0) columns = tokens.size();
       if (tokens.size() == 3) {
         n.push_back(std::stod(tokens[0]));
         a1.push_back(std::stod(tokens[1]));
@@ -59,4 +61,5 @@ public:
   const std::vector<double>& get_phi() const { return phi; }
   const std::vector<double>& get_omega() const { return omega; }
   const std::vector<double>& get_ecc() const { return ecc; }
+  int get_num_columns() const { return columns; }
 };

@@ -385,6 +385,49 @@ void device_resample(float * d_idata, float * d_odata,
   ErrorChecker::check_cuda_error("Error from device_resample");
 }
 
+//------------------Circular Orbit Search Template Bank Resampler-----------------//
+
+__device__ unsigned long getCircular_orbit_index(unsigned long idx,
+                                  double n, double a1, double phi, double zero_offset,
+                                  double tsamp, double inverse_tsamp)
+
+{
+
+    double t = idx * tsamp;
+    double mean_anomaly = n * t + phi;
+    double sine_mean_anomaly = sin(mean_anomaly);
+    return __double2ull_rn(idx - (a1 * sine_mean_anomaly * inverse_tsamp - zero_offset));
+}
+
+
+__global__ void resample_circular_kernel(float* input_d,
+                                  float* output_d,
+                                  double n, double a1, double phi, double zero_offset,
+                                  double tsamp, double inverse_tsamp, 
+                                  double size)
+
+{
+  for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
+  {
+    unsigned long out_idx = getCircular_orbit_index(idx, n, a1, phi, zero_offset,
+                                  tsamp, inverse_tsamp);
+    if (out_idx <= size - 1) 
+        output_d[idx] = input_d[out_idx];
+    else
+        output_d[idx] = 0.0; // Zero padding if resampled data needs a bin above fft_size
+      
+  }
+}
+void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n, double a1, double phi, double zero_offset, double tsamp, double inverse_tsamp,  size_t size, unsigned int max_threads, unsigned int max_blocks)
+{
+  unsigned blocks = size/max_threads + 1;
+  if (blocks > max_blocks)
+    blocks = max_blocks;
+  resample_circular_kernel<<< blocks,max_threads >>>(d_idata, d_odata, n,
+  a1, phi, zero_offset, tsamp, inverse_tsamp, (double) size);
+  ErrorChecker::check_cuda_error("Error from device_circular_orbit_resampler");
+}
+
 //------------------peak finding-----------------//
 //defined here as (although Thrust based) requires CUDA functors
 

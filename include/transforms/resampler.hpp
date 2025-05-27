@@ -30,6 +30,12 @@ public:
                     acc, input.get_tsamp(),max_threads,  max_blocks);
   }
 
+  void circular_orbit_resampler(DeviceTimeSeries<float>& input, DeviceTimeSeries<float>& output, unsigned int size, double n, double a1, double phi, double tsamp, double inverse_tsamp)
+  {
+    double zero_offset = a1 * sin(phi) * inverse_tsamp;
+    device_circular_orbit_resampler(input.get_data(), output.get_data(), n, a1, phi, zero_offset, tsamp, inverse_tsamp, size, max_threads, max_blocks);
+  }
+
 
 };
 

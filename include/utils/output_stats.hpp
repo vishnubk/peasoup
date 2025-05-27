@@ -201,6 +201,12 @@ public:
       cand.append(XML::Element("opt_period",candidates[ii].opt_period));
       cand.append(XML::Element("dm",candidates[ii].dm));
       cand.append(XML::Element("acc",candidates[ii].acc));
+      cand.append(XML::Element("jerk",candidates[ii].jerk));
+      cand.append(XML::Element("n",candidates[ii].n));
+      cand.append(XML::Element("a1",candidates[ii].a1));
+      cand.append(XML::Element("phi",candidates[ii].phi));
+      cand.append(XML::Element("omega",candidates[ii].omega));
+      cand.append(XML::Element("ecc",candidates[ii].ecc));
       cand.append(XML::Element("nh",candidates[ii].nh));
       cand.append(XML::Element("snr",candidates[ii].snr));
       cand.append(XML::Element("folded_snr",candidates[ii].folded_snr));

@@ -98,6 +98,7 @@ private:
   int device;
   std::map<std::string,Stopwatch> timers;
   std::optional<Keplerian_TemplateBank_Reader>& keplerian_tb;
+  bool elliptical_orbit_search;
 
   void preprocess_time_series(DedispersedTimeSeries<DedispOutputType>& tim,
     ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim) {
@@ -193,7 +194,6 @@ void run_acceleration_time_domain_resampler(
 }
 
 
-
 void run_acceleration_search(int idx,
     AccelerationPlan& acc_plan,
     CandidateCollection& accel_search_cands,
@@ -220,7 +220,6 @@ void run_acceleration_search(int idx,
     PUSH_NVTX_RANGE("Acceleration-Loop",1)
 
     for (int jj = 0; jj < acc_list.size(); jj++) {
-        if (args.verbose) std::cout << "Resampling to " << acc_list[jj] << " m/s/s\n";
         run_acceleration_time_domain_resampler(d_tim, d_tim_resampled, acc_list[jj], size);
         SearchParams accel_search;
         accel_search.acc = acc_list[jj];
@@ -233,12 +232,72 @@ void run_acceleration_search(int idx,
     POP_NVTX_RANGE
 }
 
+void run_circular_orbit_search_resampler(
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled, unsigned int size,
+    double n, double a1, double phi,  double tsamp, double inverse_tsamp) {
+    if (args.verbose) std::cout << "Resampling to circular orbit with n=" << n << ", a1=" << a1 << ", phi=" << phi << "\n";
+    TimeDomainResampler resampler;
+    resampler.circular_orbit_resampler(d_tim, d_tim_resampled, size, n, a1, phi, tsamp, inverse_tsamp);
+    if (args.verbose) std::cout << "Resampling complete\n"; 
+}
+
+
+       
+void run_keplerian_search(int idx,
+    Keplerian_TemplateBank_Reader& keplerian_tb,
+    CandidateCollection& keplerian_search_cands,
+    DedispersedTimeSeries<DedispOutputType>& tim,
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled,
+    CuFFTerR2C& r2cfft,
+    CuFFTerC2R& c2rfft,
+    DeviceFourierSeries<cufftComplex>& d_fseries,
+    DevicePowerSpectrum<float>& d_pspec,
+    SpectrumFormer& former,
+    HarmonicSums<float>& sums,
+    HarmonicFolder& harm_folder,
+    PeakFinder& cand_finder,
+    HarmonicDistiller& harm_finder,
+    float mean, float std, unsigned int size,
+    double tsamp, double inverse_tsamp
+    ) {
+
+    const auto& n   = keplerian_tb.get_n();
+    const auto& a1  = keplerian_tb.get_a1();
+    const auto& phi = keplerian_tb.get_phi();
+    const auto& omega  = keplerian_tb.get_omega();
+    const auto& ecc  = keplerian_tb.get_ecc();
+
+    for (size_t kk = 0; kk < a1.size(); ++kk) {
+
+        if (elliptical_orbit_search) {
+
+            std::cout << "Running elliptical orbit search for n=" << n[kk] << "\n";
+        }
+        else {
+  
+            run_circular_orbit_search_resampler(d_tim, d_tim_resampled, size,  n[kk], a1[kk], phi[kk], tsamp, inverse_tsamp);
+            SearchParams circular_orbit_search;
+            circular_orbit_search.n = n[kk];
+            circular_orbit_search.a1 = a1[kk];
+            circular_orbit_search.phi = phi[kk];
+            SpectrumCandidates trial_cands(tim.get_dm(), idx, circular_orbit_search);
+
+            run_search_and_find_candidates(
+                d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+                sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                keplerian_search_cands, mean, std, size);
+        }
+    }
+}
+
 public:
   CandidateCollection dm_trial_cands;
 
   Worker(DispersionTrials<DedispOutputType>& trials, DMDispenser& manager,
 	 AccelerationPlan& acc_plan, CmdLineOptions& args, unsigned int size, int device,
-         std::optional<Keplerian_TemplateBank_Reader>& keplerian_tb)
+         std::optional<Keplerian_TemplateBank_Reader>& keplerian_tb, bool elliptical_orbit_search)
     :trials(trials)
     ,manager(manager)
     ,acc_plan(acc_plan)
@@ -246,6 +305,7 @@ public:
     ,size(size)
     ,device(device)
     ,keplerian_tb(keplerian_tb)
+    ,elliptical_orbit_search(elliptical_orbit_search)  
   {}
 
   void start(void)
@@ -259,6 +319,8 @@ public:
     CuFFTerC2R c2rfft(size);
     float tobs = size*trials.get_tsamp();
     float bin_width = 1.0/tobs;
+    double tsamp = trials.get_tsamp();
+    double inverse_tsamp = 1.0 / tsamp;
     DeviceFourierSeries<cufftComplex> d_fseries(size/2+1,bin_width);
     DedispersedTimeSeries<DedispOutputType> tim;
     ReusableDeviceTimeSeries<float, DedispOutputType> d_tim(size);
@@ -294,17 +356,60 @@ public:
         //Start processing
         preprocess_time_series(tim, d_tim);
         remove_rednoise_and_zap(d_tim, r2cfft, c2rfft, d_fseries, d_pspec, rednoise, bzap, former, mean, rms, std);
-        
-        CandidateCollection accel_search_cands;
-        
-        // Acceleration search only
-        run_acceleration_search(
-            idx, acc_plan, accel_search_cands, acc_list, tim, d_tim, d_tim_resampled, r2cfft, c2rfft,
-            d_fseries, d_pspec, former, sums, harm_folder, cand_finder,
-            harm_finder, mean, std, size);
 
-        if (args.verbose) std::cout << "Distilling accelerations" << std::endl;
-        dm_trial_cands.append(acc_still.distill(accel_search_cands.cands));
+        if (keplerian_tb) {
+            
+            // const auto& n   = keplerian_tb->get_n();
+            // const auto& a1  = keplerian_tb->get_a1();
+            // const auto& phi = keplerian_tb->get_phi();
+            // const auto& om  = keplerian_tb->get_omega();
+            // const auto& ec  = keplerian_tb->get_ecc();
+
+            if (args.verbose) std::cout << "Searching Keplerian templates for DM " << tim.get_dm() << "\n";
+
+            CandidateCollection keplerian_search_cands;
+           
+            run_keplerian_search(
+                idx, *keplerian_tb, keplerian_search_cands, tim, d_tim, d_tim_resampled,
+                r2cfft, c2rfft, d_fseries, d_pspec, former, sums, harm_folder,
+                cand_finder, harm_finder, mean, std, size, tsamp, inverse_tsamp);
+            
+            dm_trial_cands.append(keplerian_search_cands.cands);
+
+            // for (size_t kk = 0; kk < a1.size(); ++kk) {
+            //     if (args.verbose) {
+            //         std::cout << "  Template " << kk
+            //                   << ": n="   << n[kk]
+            //                   << ", a1="  << a1[kk]
+            //                   << ", phi=" << phi[kk];
+            //         if (elliptical_orbit_search) {
+            //             std::cout << ", omega=" << om[kk]
+            //                       << ", ecc="   << ec[kk];
+            //         }
+            //         std::cout << "\n";
+            //     }
+            //     if (elliptical_orbit_search){
+            //        std::cout << "  Running elliptical orbit search for n=" << n[kk] << "\n";
+            //     }
+            //     else {
+            //         std::cout << "  Running circular orbit search for n=" << n[kk] << "\n";
+            //     }    
+            // }
+        }
+
+        else {
+        
+            CandidateCollection accel_search_cands;
+            
+            // Acceleration search only
+            run_acceleration_search(
+                idx, acc_plan, accel_search_cands, acc_list, tim, d_tim, d_tim_resampled, r2cfft, c2rfft,
+                d_fseries, d_pspec, former, sums, harm_folder, cand_finder,
+                harm_finder, mean, std, size);
+
+            if (args.verbose) std::cout << "Distilling accelerations" << std::endl;
+            dm_trial_cands.append(acc_still.distill(accel_search_cands.cands));
+        }
     }
 	POP_NVTX_RANGE
 
@@ -433,6 +538,7 @@ int main(int argc, char **argv)
     filobj.get_foff() * 1e6 // from header in MHz needs converted to Hz
     );
  
+
   std::optional<Keplerian_TemplateBank_Reader> keplerian_tb;
 
   if (args.keplerian_tb_file != "none") {
@@ -441,14 +547,14 @@ int main(int argc, char **argv)
 
     keplerian_tb.emplace(args.keplerian_tb_file);
 
-    // Print first 5 values of n
-    const auto& n_vals = keplerian_tb->get_n();
-    std::cout << "First 5 values of n: ";
-    for (size_t i = 0; i < std::min(n_vals.size(), size_t(5)); ++i)
-        std::cout << n_vals[i] << " ";
-    std::cout << std::endl;
+    if (args.verbose) std::cout << "Loaded " << keplerian_tb->get_n().size()  << " templates\n";
 }
-  
+
+  // Compute the “elliptical or circular” flag once
+  bool elliptical_orbit_search = false;
+  if (keplerian_tb && keplerian_tb->get_num_columns() == 5) {
+    elliptical_orbit_search = true;
+  }
 
 
   if (args.verbose)
@@ -549,7 +655,7 @@ int main(int argc, char **argv)
    
     
     for (int ii=0;ii<nthreads;ii++){
-      workers[ii] = (new Worker(trials,dispenser,acc_plan,args,size,ii,keplerian_tb));
+      workers[ii] = (new Worker(trials,dispenser,acc_plan,args,size,ii,keplerian_tb,elliptical_orbit_search));
       pthread_create(&threads[ii], NULL, launch_worker_thread, (void*) workers[ii]);
     }
 
