@@ -36,6 +36,11 @@ public:
     device_circular_orbit_resampler(input.get_data(), output.get_data(), n, a1, phi, zero_offset, tsamp, inverse_tsamp, size, max_threads, max_blocks);
   }
 
+  void elliptical_orbit_resampler_approx(DeviceTimeSeries<float>& input, DeviceTimeSeries<float>& output, unsigned int size, double n, double a1, double phi, double omega, double ecc, double tsamp, double inverse_tsamp)
+  {
+   device_elliptical_orbit_resampler_approx(input.get_data(), output.get_data(), n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size, max_threads, max_blocks);
+}
+
 
 };
 

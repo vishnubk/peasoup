@@ -242,6 +242,18 @@ void run_circular_orbit_search_resampler(
     if (args.verbose) std::cout << "Resampling complete\n"; 
 }
 
+void run_elliptical_orbit_search_resampler(
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled, unsigned int size,
+    double n, double a1, double phi, double omega, double ecc,
+    double tsamp, double inverse_tsamp) {
+    if (args.verbose) std::cout << "Resampling to elliptical orbit with n=" << n << ", a1=" << a1 << ", phi=" << phi << ", omega=" << omega << ", ecc=" << ecc << "\n";
+    TimeDomainResampler resampler;
+    resampler.elliptical_orbit_resampler_approx(d_tim, d_tim_resampled, size, n, a1, phi, omega, ecc, tsamp, inverse_tsamp);
+    if (args.verbose) std::cout << "Resampling complete\n"; 
+}
+
+
 
        
 void run_keplerian_search(int idx,
@@ -273,7 +285,18 @@ void run_keplerian_search(int idx,
 
         if (elliptical_orbit_search) {
 
-            std::cout << "Running elliptical orbit search for n=" << n[kk] << "\n";
+            run_elliptical_orbit_search_resampler(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
+            SearchParams elliptical_orbit_search;
+            elliptical_orbit_search.n = n[kk];
+            elliptical_orbit_search.a1 = a1[kk];
+            elliptical_orbit_search.phi = phi[kk];
+            elliptical_orbit_search.omega = omega[kk];
+            elliptical_orbit_search.ecc = ecc[kk];
+            SpectrumCandidates trial_cands(tim.get_dm(), idx, elliptical_orbit_search);
+            run_search_and_find_candidates(
+                d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+                sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                keplerian_search_cands, mean, std, size);
         }
         else {
   
@@ -359,11 +382,6 @@ public:
 
         if (keplerian_tb) {
             
-            // const auto& n   = keplerian_tb->get_n();
-            // const auto& a1  = keplerian_tb->get_a1();
-            // const auto& phi = keplerian_tb->get_phi();
-            // const auto& om  = keplerian_tb->get_omega();
-            // const auto& ec  = keplerian_tb->get_ecc();
 
             if (args.verbose) std::cout << "Searching Keplerian templates for DM " << tim.get_dm() << "\n";
 
@@ -376,25 +394,6 @@ public:
             
             dm_trial_cands.append(keplerian_search_cands.cands);
 
-            // for (size_t kk = 0; kk < a1.size(); ++kk) {
-            //     if (args.verbose) {
-            //         std::cout << "  Template " << kk
-            //                   << ": n="   << n[kk]
-            //                   << ", a1="  << a1[kk]
-            //                   << ", phi=" << phi[kk];
-            //         if (elliptical_orbit_search) {
-            //             std::cout << ", omega=" << om[kk]
-            //                       << ", ecc="   << ec[kk];
-            //         }
-            //         std::cout << "\n";
-            //     }
-            //     if (elliptical_orbit_search){
-            //        std::cout << "  Running elliptical orbit search for n=" << n[kk] << "\n";
-            //     }
-            //     else {
-            //         std::cout << "  Running circular orbit search for n=" << n[kk] << "\n";
-            //     }    
-            // }
         }
 
         else {

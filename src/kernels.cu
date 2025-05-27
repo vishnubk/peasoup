@@ -411,11 +411,12 @@ __global__ void resample_circular_kernel(float* input_d,
   {
     unsigned long out_idx = getCircular_orbit_index(idx, n, a1, phi, zero_offset,
                                   tsamp, inverse_tsamp);
-    if (out_idx <= size - 1) 
+    if (out_idx <= size - 1){
         output_d[idx] = input_d[out_idx];
-    else
+    }
+    else {
         output_d[idx] = 0.0; // Zero padding if resampled data needs a bin above fft_size
-      
+    }
   }
 }
 void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n, double a1, double phi, double zero_offset, double tsamp, double inverse_tsamp,  size_t size, unsigned int max_threads, unsigned int max_blocks)
@@ -426,6 +427,115 @@ void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n,
   resample_circular_kernel<<< blocks,max_threads >>>(d_idata, d_odata, n,
   a1, phi, zero_offset, tsamp, inverse_tsamp, (double) size);
   ErrorChecker::check_cuda_error("Error from device_circular_orbit_resampler");
+}
+
+//--------------------Elliptical Orbit Search Template Bank Resampler-----------------//
+
+__device__ unsigned long getElliptical_orbit_index_approx(unsigned long idx, double n, double a1, double phi, 
+    double omega, double ecc, double zero_offset,
+    double tsamp, double inverse_tsamp,  double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, 
+    double s1, double s2, double s3, double s4, double s5, double s6, double s7)
+
+{
+
+    double t = idx * tsamp;
+    /* The constant below is pi/2. This is just a convention for where you define zero point for orbital phase. Done to ensure consistency
+          between the template bank circular & elliptical code  */
+    double mean_anomaly = 1.5707963267948966 - (n * t + phi);
+    double cosE = c0 + c1 * cos(mean_anomaly) + c2 * cos(2 * mean_anomaly) + c3 * cos(3 * mean_anomaly) + c4 * cos(4 * mean_anomaly) + c5 * cos(5 * mean_anomaly) + c6 * cos(6 * mean_anomaly) + c7 * cos(7 * mean_anomaly);
+
+    double sinE = s1 * sin(mean_anomaly) + s2 * sin(2 * mean_anomaly) + s3 * sin(3 * mean_anomaly) + s4 * sin(4 * mean_anomaly) + s5 * sin(5 * mean_anomaly) + s6 * sin(6 * mean_anomaly) + s7 * sin(7 * mean_anomaly);
+   
+    double bin_offset = a1 * (cos(omega) * cosE + sin(omega) * sinE) * inverse_tsamp  - zero_offset;
+ 
+    return __double2ull_rn(idx - bin_offset);
+}
+
+__global__ void resample_elliptical_approx_kernel(float* input_d, float* output_d,
+    double n, double a1, double phi, double omega, double ecc, double zero_offset,  
+    double tsamp, double inverse_tsamp, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, 
+    double s1, double s2, double s3, double s4, double s5, double s6, double s7, double size)
+
+
+{
+  for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
+  {
+
+    unsigned long out_idx = getElliptical_orbit_index_approx(idx, n, a1, phi, omega, ecc, zero_offset,
+    tsamp, inverse_tsamp, c0, c1, c2, c3, c4, c5, c6, c7, s1, s2, s3, s4, s5, s6, s7);
+
+    if (out_idx <= size - 1){
+        output_d[idx] = input_d[out_idx];
+    }
+   /* Zero padding if resampled data needs a bin above fft_size */
+    else{
+        output_d[idx] = 0.0;
+    }
+  }
+}
+
+/* The fn. below is an implementation of the fast 5-D resampler!*/
+
+void device_elliptical_orbit_resampler_approx(float * d_idata, float * d_odata, double n, double a1, double phi, double omega, double ecc, double tsamp, double inverse_tsamp, size_t size, unsigned int max_threads, unsigned int max_blocks)
+{
+    /* These values were taken from Dhurandhar et al. 2000. Original derivation can be found in 
+     L. G. Taff, Celestial Mechanics (John Wiley and Sons, Inc., New York 1985), pp. 58-61.
+     Here we expand the taylor series to 7th order which should cover upto ecc 0.8. If your system is more eccentric, consider
+     adding higher order terms. Future versions of the software will expand the order depending on the ecc' */
+   
+   /* Original expression is given below. To make the code faster, we will get rid of the division terms. 
+    c0 = -0.5 * ecc
+    c1 = 1 - (3/8) * ecc**2 + (5/192) * ecc**4 - (7/9216) * ecc**6
+    c2 = 0.5 * ecc - (1/3) * ecc**3 + (1/16) * ecc**5
+    c3 = (3/8) * ecc**2 - (45/128) * ecc**4 + (567/5120) * ecc**6
+    c4 = (1/3) * ecc**3 - (2/5) * ecc**5
+    c5 = (125/384) * ecc**4 - (4375/9216) * ecc**6
+    c6 = (27/80) * ecc**5
+    c7 = (16807/46080) * ecc**6
+
+    s1 = 1 - (5/8) * ecc**2 - (11/192) * ecc**4 - (457/9216) * ecc**6
+    s2 = (1/2) * ecc - (5/12) * ecc**3 + (1/24) * ecc**5
+    s3 = (3/8) * ecc**2 - (51/128) * ecc**4 + (543/5120) * ecc**6
+    s4 = (1/3) * ecc**3 - (13/30) * ecc**5
+    s5 = (125/384) * ecc**4 - (4625/9216) * ecc**6
+    s6 = (27/80) * ecc**5
+    s7 = (16807/46080) * ecc**6 */
+
+                                          
+    double c0 = -0.5 * ecc;
+    double c1 = 1 - 0.375 * pow(ecc, 2) + 0.02604166666 * pow(ecc, 4) - 0.00075954861 * pow(ecc, 6);
+    double c2 = 0.5 * ecc - 0.33333333 * pow(ecc, 3) + 0.0625 * pow(ecc, 5);
+    double c3 = 0.375 * pow(ecc, 2) - 0.3515625 * pow(ecc, 4) + 0.1107421875 * pow(ecc, 6);
+    double c4 = 0.33333333 * pow(ecc, 3) - 0.4 * pow(ecc, 5);
+    double c5 = 0.32552083333 * pow(ecc, 4) - 0.47471788194 * pow(ecc, 6);
+    double c6 = 0.3375 * pow(ecc, 5);
+    double c7 = 0.36473524305 * pow(ecc, 6);
+
+    double s1 = 1 - 0.625 * pow(ecc, 2) - 0.05729166666 * pow(ecc, 4) - 0.04958767361 * pow(ecc, 6);
+    double s2 = 0.5 * ecc - 0.41666666666 * pow(ecc, 3) + 0.04166666666 * pow(ecc, 5);
+    double s3 = 0.375 * pow(ecc, 2) - 0.3984375 * pow(ecc, 4) + 0.1060546875 * pow(ecc, 6);
+    double s4 = 0.33333333 * pow(ecc, 3) - 0.43333333333 * pow(ecc, 5);
+    double s5 = 0.32552083333 * pow(ecc, 4) - 0.50184461805 * pow(ecc, 6);
+    double s6 = 0.3375 * pow(ecc, 5);
+    double s7 = 0.36473524305 * pow(ecc, 6);
+
+     /* At t = 0, the n * t term vanishes */
+
+    double cosE = c0 + c1 * cos(phi) + c2 * cos(2 * phi) + c3 * cos(3 * phi) + c4 * cos(4 * phi) + c5 * cos(5 * phi) + c6 * cos(6 * phi) + c7 * cos(7 * phi);
+
+    double sinE = s1 * sin(phi) + s2 * sin(2 * phi) + s3 * sin(3 * phi) + s4 * sin(4 * phi) + s5 * sin(5 * phi) + s6 * sin(6 * phi) + s7 * sin(7 * phi);
+
+    double zero_offset = a1 * (cos(omega) * cosE + sin(omega) * sinE) * inverse_tsamp;
+    unsigned blocks = size/max_threads + 1;
+  
+    if (blocks > max_blocks)
+        blocks = max_blocks;
+        
+        resample_elliptical_approx_kernel<<< blocks,max_threads >>>(d_idata, d_odata,
+                         n, a1, phi, omega, ecc, zero_offset, tsamp, inverse_tsamp, 
+                         c0, c1, c2, c3, c4, c5, c6, c7, s1, s2, s3, s4, s5, s6, s7, (double) size);
+
+    ErrorChecker::check_cuda_error("Error from device_elliptical_orbit_resampler_approx");
 }
 
 //------------------peak finding-----------------//
