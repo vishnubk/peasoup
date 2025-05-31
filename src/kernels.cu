@@ -394,9 +394,12 @@ __device__ unsigned long getCircular_orbit_index(unsigned long idx,
 {
 
     double t = idx * tsamp;
-    double mean_anomaly = n * t + phi;
+    //double mean_anomaly = n * t + phi;
+    double mean_anomaly = n * t - phi;
     double sine_mean_anomaly = sin(mean_anomaly);
-    return __double2ull_rn(idx - (a1 * sine_mean_anomaly * inverse_tsamp - zero_offset));
+    //return __double2ull_rn(idx - (a1 * sine_mean_anomaly * inverse_tsamp - zero_offset));
+    return __double2ull_rn(idx + (a1 * sine_mean_anomaly * inverse_tsamp - zero_offset));
+
 }
 
 
@@ -442,6 +445,7 @@ __device__ unsigned long getElliptical_orbit_index_approx(unsigned long idx, dou
     /* The constant below is pi/2. This is just a convention for where you define zero point for orbital phase. Done to ensure consistency
           between the template bank circular & elliptical code  */
     double mean_anomaly = 1.5707963267948966 - (n * t + phi);
+    //double mean_anomaly = n * t + phi;
     double cosE = c0 + c1 * cos(mean_anomaly) + c2 * cos(2 * mean_anomaly) + c3 * cos(3 * mean_anomaly) + c4 * cos(4 * mean_anomaly) + c5 * cos(5 * mean_anomaly) + c6 * cos(6 * mean_anomaly) + c7 * cos(7 * mean_anomaly);
 
     double sinE = s1 * sin(mean_anomaly) + s2 * sin(2 * mean_anomaly) + s3 * sin(3 * mean_anomaly) + s4 * sin(4 * mean_anomaly) + s5 * sin(5 * mean_anomaly) + s6 * sin(6 * mean_anomaly) + s7 * sin(7 * mean_anomaly);
@@ -538,6 +542,170 @@ void device_elliptical_orbit_resampler_approx(float * d_idata, float * d_odata, 
     ErrorChecker::check_cuda_error("Error from device_elliptical_orbit_resampler_approx");
 }
 
+//-----Elliptical Orbit Exact Resampler-----//
+
+__device__ double get_roemer_delay_elliptical_exact_value(unsigned long idx, double n, double a1, 
+    double phi_n, double omega, double ecc, double tsamp)
+
+{
+
+//Do t = 0, calculations first.
+double inverse_tsamp = 1.0 / tsamp;
+double orbital_period_seconds = 2 * M_PI/n;
+double T0_periastron = phi_n * orbital_period_seconds;
+double mean_anomaly_zero = -1 * n * T0_periastron;
+double eccentric_anomaly_zero = mean_anomaly_zero + ecc * sin(mean_anomaly_zero) * (1. + ecc * cos(mean_anomaly_zero));
+//Computing eccentric anomaly at t=0 by iterating kepler's equation
+double du_zero = 1.;
+while(abs(du_zero) > 1.0e-8)
+{
+    du_zero = (mean_anomaly_zero - (eccentric_anomaly_zero - ecc * sin(eccentric_anomaly_zero)))/(1.0 - ecc * cos(eccentric_anomaly_zero));
+    eccentric_anomaly_zero+= du_zero;
+}
+//Calculating the roemer delay at t=0
+double zero_offset = a1  * ((cos(eccentric_anomaly_zero) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly_zero) * cos(omega)) * inverse_tsamp;
+
+
+//double phi = phi_n * 2 * M_PI; // Convert phi_n to radians
+
+double mean_anomaly = n * ((idx * tsamp) - T0_periastron);
+double eccentric_anomaly = mean_anomaly + ecc * sin(mean_anomaly) * (1. + ecc * cos(mean_anomaly));
+
+//Computing eccentric anomaly by iterating kepler's equation
+// initializing to large value
+double du = 1.;
+while(abs(du) > 1.0e-13)
+{
+    du = (mean_anomaly - (eccentric_anomaly - ecc * sin(eccentric_anomaly)))/(1.0 - ecc * cos(eccentric_anomaly));
+    eccentric_anomaly+= du;
+}
+
+double roemer_delay = a1  * ((cos(eccentric_anomaly) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly) * cos(omega)) * inverse_tsamp;
+
+double roemer_delay_final = roemer_delay - zero_offset;
+
+return __double2ull_rn(idx + roemer_delay_final);
+}
+
+// __global__ void remove_roemer_delay_elliptical_exact_kernel(double* device_start_timeseries, 
+//     double* device_roemer_delay_removed_timeseries,
+//     double n, double a1, double phi_n, double omega, double ecc,
+//     double tsamp, double size)
+
+__global__ void remove_roemer_delay_elliptical_exact_kernel(float* d_idata, 
+    float* d_odata,
+    double n, double a1, double phi_n, double omega, double ecc,
+    double tsamp, double size)
+
+{
+for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
+{
+unsigned long out_idx = get_roemer_delay_elliptical_exact_value(idx, n, a1, phi_n, omega,
+    ecc, tsamp);
+
+    if (out_idx < size)
+{
+    d_odata[idx] = d_idata[out_idx];
+
+}
+else
+{
+    d_odata[idx] = 0.0; // Zero padding if resampled data needs a bin above fft_size
+
+}
+
+}
+}
+
+// void device_remove_roemer_delay_elliptical_exact(double* start_timeseries_array, double* roemer_delay_removed_timeseries_array,
+//     double n, double a1, double phi_n, double omega, double ecc, 
+//     double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
+void device_remove_roemer_delay_elliptical_exact(float* d_idata, float* d_odata,
+    double n, double a1, double phi_n, double omega, double ecc, 
+    double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
+{
+
+ unsigned blocks = size/max_threads + 1;
+ if (blocks > max_blocks)
+   blocks = max_blocks;
+
+ remove_roemer_delay_elliptical_exact_kernel<<< blocks,max_threads >>>(d_idata, d_odata, n,
+ a1, phi_n, omega, ecc, tsamp, (double) size);
+
+ ErrorChecker::check_cuda_error("Error from device_remove_roemer_delay_elliptical_exact");
+}
+//------------ 1D LERP RESAMPLER----------------//
+
+/* 1. Lerp Algorithm equivalent to np.interp and scipy.interpolate.interp1d in python
+
+Definitions:
+xp --> xarray of data --> device_roemer_delay_removed_timeseries
+yp --> yarray of data --> input_d
+x ----> xarray where we want to evaulate the interpolated values ---> output_samples_array
+y ----> yarray we want to calculate ---> output_d
+size ---> len(xp) == len(yp)
+x_size ---> len(x) 
+
+Assume xp is sorted in ascending order.
+1. For each value of x, find the segment/interval in xp that contains x. Use a binary search algorithm. Scales as O(logn)
+2. Use equation y=mx+b to calculate interpolated value based on the segment chosen from step 1.
+*/
+
+
+__device__ void bsearch_range(double *a, double key, unsigned long len_a, unsigned long *idx){
+    unsigned long lower = 0;
+    unsigned long upper = len_a;
+    unsigned long midpt;
+    while (lower < upper){
+  
+      // '>>1' is the right bitshift operator which is equivalent to dividing by 2 for unsigned numbers.
+  
+      midpt = (lower + upper)>>1;
+      if (a[midpt] < key) lower = midpt +1;
+      else upper = midpt;
+      }
+    *idx = lower;
+    return;
+    }
+
+__global__ void resample_using_1D_lerp_kernel(double *device_roemer_delay_removed_timeseries, float  *input_d, unsigned long xp_len, unsigned long x_len, double *output_samples_array, float *output_d){
+  
+    //for (unsigned long i = threadIdx.x+blockDim.x*blockIdx.x; i < x_len; i+=gridDim.x*blockDim.x){
+    for (unsigned long i = threadIdx.x+blockDim.x*blockIdx.x; i < xp_len; i+=gridDim.x*blockDim.x){
+    
+      double val = output_samples_array[i];
+      if ((val >= device_roemer_delay_removed_timeseries[0]) && (val <= device_roemer_delay_removed_timeseries[xp_len - 1])){
+        unsigned long idx;
+        bsearch_range(device_roemer_delay_removed_timeseries, val, xp_len, &idx);
+        double xlv = device_roemer_delay_removed_timeseries[idx - 1];
+        double xrv = device_roemer_delay_removed_timeseries[idx];
+        double ylv = input_d[idx - 1];
+        double yrv = input_d[idx];
+
+       // y  =      m                *   x       + b
+       output_d[i] = ((yrv-ylv)/(xrv-xlv)) * (val-xlv) + ylv;
+      }
+         
+
+    }
+    //Add padding here.
+
+  }
+
+
+void device_resample_using_1D_lerp(double *device_roemer_delay_removed_timeseries, float  *input_d, 
+    unsigned long xp_len, unsigned long x_len, double *output_samples_array, float *output_d,
+    unsigned int max_threads, unsigned int max_blocks)
+{
+
+unsigned blocks = xp_len/max_threads + 1;
+if (blocks > max_blocks)
+  blocks = max_blocks;
+resample_using_1D_lerp_kernel<<< blocks,max_threads >>>(device_roemer_delay_removed_timeseries, input_d, xp_len, 
+                                                       x_len, output_samples_array, output_d);
+
+ErrorChecker::check_cuda_error("Error from device_resample_using_1D_lerp");
+}
 //------------------peak finding-----------------//
 //defined here as (although Thrust based) requires CUDA functors
 

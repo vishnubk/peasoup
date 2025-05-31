@@ -143,6 +143,18 @@ void device_elliptical_orbit_resampler_approx(float * d_idata,
                                             unsigned int max_threads, unsigned int max_blocks);
 
 
+// void device_remove_roemer_delay_elliptical_exact(double* start_timeseries_array, double* roemer_delay_removed_timeseries_array,
+//     double n, double a1, double phi_n, double omega, double ecc, 
+//     double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
+
+void device_remove_roemer_delay_elliptical_exact(float* d_idata, float* d_odata,
+    double n, double a1, double phi_n, double omega, double ecc, 
+    double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
+
+// void device_resample_using_1D_lerp(double *device_roemer_delay_removed_timeseries, float  *input_d, 
+//     unsigned long xp_len, unsigned long x_len, double *output_samples_array, float *output_d,
+//     unsigned int max_threads, unsigned int max_blocks);
+
 int device_find_peaks(int n,
 		      int start_index,
 		      float * d_dat,
