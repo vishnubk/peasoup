@@ -99,6 +99,74 @@ void harmonic_sum_kernel(float *d_idata, float **d_odata,
   return;
 }
 
+__global__
+void harmonic_sum_kernel_single_precision(float *d_idata, float **d_odata,
+             size_t size, unsigned nharms)
+
+{
+  for( int idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
+    {
+      float val = d_idata[idx];
+
+      if (nharms>0)
+    {
+      val += d_idata[__float2int_rn(idx*0.5f)];
+      d_odata[0][idx] = val * 0.7071067811865475f;
+    }
+
+      if (nharms>1)
+    {
+      val += d_idata[__float2int_rn(idx * 0.75f)];
+      val += d_idata[__float2int_rn(idx * 0.25f)];
+      d_odata[1][idx] = val * 0.5f;
+    }
+
+      if (nharms>2)
+    {
+      val += d_idata[__float2int_rn(idx * 0.125f)];
+      val += d_idata[__float2int_rn(idx * 0.375f)];
+      val += d_idata[__float2int_rn(idx * 0.625f)];
+      val += d_idata[__float2int_rn(idx * 0.875f)];
+      d_odata[2][idx] = val * 0.35355339059327373f;
+    }
+
+      if (nharms>3)
+    {
+      val += d_idata[__float2int_rn(idx * 0.0625f)];
+      val += d_idata[__float2int_rn(idx * 0.1875f)];
+      val += d_idata[__float2int_rn(idx * 0.3125f)];
+      val += d_idata[__float2int_rn(idx * 0.4375f)];
+      val += d_idata[__float2int_rn(idx * 0.5625f)];
+      val += d_idata[__float2int_rn(idx * 0.6875f)];
+      val += d_idata[__float2int_rn(idx * 0.8125f)];
+      val += d_idata[__float2int_rn(idx * 0.9375f)];
+      d_odata[3][idx] = val * 0.25f;
+    }
+
+      if (nharms>4)
+    {
+      val += d_idata[__float2int_rn(idx * 0.03125f)];
+      val += d_idata[__float2int_rn(idx * 0.09375f)];
+      val += d_idata[__float2int_rn(idx * 0.15625f)];
+      val += d_idata[__float2int_rn(idx * 0.21875f)];
+      val += d_idata[__float2int_rn(idx * 0.28125f)];
+      val += d_idata[__float2int_rn(idx * 0.34375f)];
+      val += d_idata[__float2int_rn(idx * 0.40625f)];
+      val += d_idata[__float2int_rn(idx * 0.46875f)];
+      val += d_idata[__float2int_rn(idx * 0.53125f)];
+      val += d_idata[__float2int_rn(idx * 0.59375f)];
+      val += d_idata[__float2int_rn(idx * 0.65625f)];
+      val += d_idata[__float2int_rn(idx * 0.71875f)];
+      val += d_idata[__float2int_rn(idx * 0.78125f)];
+      val += d_idata[__float2int_rn(idx * 0.84375f)];
+      val += d_idata[__float2int_rn(idx * 0.90625f)];
+      val += d_idata[__float2int_rn(idx * 0.96875f)];
+      d_odata[4][idx] = val * 0.17677669529663687f;
+    }
+    }
+  return;
+}
+
 /*
 __global__
 void harmonic_sum_kernel_wshared(float *d_idata, float **d_odata,
@@ -198,13 +266,20 @@ void harmonic_sum_kernel_wshared(float *d_idata, float **d_odata,
   }*/
 
 void device_harmonic_sum(float* d_input_array, float** d_output_array,
-			 size_t size, unsigned nharms,
+			 size_t size, unsigned nharms, bool single_precision,
 			 unsigned int max_blocks, unsigned int max_threads)
 {
   unsigned blocks = size/max_threads + 1;
   if (blocks > max_blocks)
     blocks = max_blocks;
-  harmonic_sum_kernel<<<blocks,max_threads>>>(d_input_array,d_output_array,size,nharms);
+
+    if (single_precision) {
+    // Use single precision kernel for harmonic sum
+    harmonic_sum_kernel_single_precision<<<blocks, max_threads>>>(
+        d_input_array, d_output_array, size, nharms);
+    }else {
+    harmonic_sum_kernel<<<blocks,max_threads>>>(d_input_array,d_output_array,size,nharms);
+    }
   ErrorChecker::check_cuda_error("Error from device_harmonic_sum");
 }
 
@@ -422,8 +497,12 @@ __global__ void resample_circular_kernel(float* input_d,
     }
   }
 }
-void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n, double a1, double phi, double zero_offset, double tsamp, double inverse_tsamp,  size_t size, unsigned int max_threads, unsigned int max_blocks)
+void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n, double a1, double phi, double tsamp, double inverse_tsamp,  size_t size, unsigned int max_threads, unsigned int max_blocks)
 {
+ 
+    /* At t = 0, the n * t term vanishes */
+  double zero_offset = a1 * -1 * sin(phi) * inverse_tsamp;
+
   unsigned blocks = size/max_threads + 1;
   if (blocks > max_blocks)
     blocks = max_blocks;
@@ -434,7 +513,7 @@ void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n,
 
 //--------------------Elliptical Orbit Search Template Bank Resampler-----------------//
 
-__device__ unsigned long getElliptical_orbit_index_approx(unsigned long idx, double n, double a1, double phi, 
+__device__ unsigned long get_ell8_resampler_idx(unsigned long idx, double n, double a1, double phi, 
     double omega, double ecc, double zero_offset,
     double tsamp, double inverse_tsamp,  double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, 
     double s1, double s2, double s3, double s4, double s5, double s6, double s7)
@@ -442,20 +521,20 @@ __device__ unsigned long getElliptical_orbit_index_approx(unsigned long idx, dou
 {
 
     double t = idx * tsamp;
-    /* The constant below is pi/2. This is just a convention for where you define zero point for orbital phase. Done to ensure consistency
-          between the template bank circular & elliptical code  */
-    double mean_anomaly = 1.5707963267948966 - (n * t + phi);
-    //double mean_anomaly = n * t + phi;
+    double mean_anomaly = n * t - phi;
+
     double cosE = c0 + c1 * cos(mean_anomaly) + c2 * cos(2 * mean_anomaly) + c3 * cos(3 * mean_anomaly) + c4 * cos(4 * mean_anomaly) + c5 * cos(5 * mean_anomaly) + c6 * cos(6 * mean_anomaly) + c7 * cos(7 * mean_anomaly);
 
+    //The variable below is called sinE for brevity. It is actually sqrt(1-e**2) * sinE Power expansion
     double sinE = s1 * sin(mean_anomaly) + s2 * sin(2 * mean_anomaly) + s3 * sin(3 * mean_anomaly) + s4 * sin(4 * mean_anomaly) + s5 * sin(5 * mean_anomaly) + s6 * sin(6 * mean_anomaly) + s7 * sin(7 * mean_anomaly);
    
-    double bin_offset = a1 * (cos(omega) * cosE + sin(omega) * sinE) * inverse_tsamp  - zero_offset;
+    double bin_offset = a1 * (sin(omega) * cosE + cos(omega) * sinE) * inverse_tsamp  - zero_offset;
+
  
-    return __double2ull_rn(idx - bin_offset);
+    return __double2ull_rn(idx + bin_offset);
 }
 
-__global__ void resample_elliptical_approx_kernel(float* input_d, float* output_d,
+__global__ void ell8_resampler_kernel(float* input_d, float* output_d,
     double n, double a1, double phi, double omega, double ecc, double zero_offset,  
     double tsamp, double inverse_tsamp, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, 
     double s1, double s2, double s3, double s4, double s5, double s6, double s7, double size)
@@ -465,7 +544,7 @@ __global__ void resample_elliptical_approx_kernel(float* input_d, float* output_
   for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
   {
 
-    unsigned long out_idx = getElliptical_orbit_index_approx(idx, n, a1, phi, omega, ecc, zero_offset,
+    unsigned long out_idx = get_ell8_resampler_idx(idx, n, a1, phi, omega, ecc, zero_offset,
     tsamp, inverse_tsamp, c0, c1, c2, c3, c4, c5, c6, c7, s1, s2, s3, s4, s5, s6, s7);
 
     if (out_idx <= size - 1){
@@ -478,9 +557,9 @@ __global__ void resample_elliptical_approx_kernel(float* input_d, float* output_
   }
 }
 
-/* The fn. below is an implementation of the fast 5-D resampler!*/
+/* The fn. below is an implementation of the fast ell8 5-D resampler!*/
 
-void device_elliptical_orbit_resampler_approx(float * d_idata, float * d_odata, double n, double a1, double phi, double omega, double ecc, double tsamp, double inverse_tsamp, size_t size, unsigned int max_threads, unsigned int max_blocks)
+void device_ell8_resampler(float * d_idata, float * d_odata, double n, double a1, double phi, double omega, double ecc, double tsamp, double inverse_tsamp, size_t size, unsigned int max_threads, unsigned int max_blocks)
 {
     /* These values were taken from Dhurandhar et al. 2000. Original derivation can be found in 
      L. G. Taff, Celestial Mechanics (John Wiley and Sons, Inc., New York 1985), pp. 58-61.
@@ -524,10 +603,12 @@ void device_elliptical_orbit_resampler_approx(float * d_idata, float * d_odata, 
     double s7 = 0.36473524305 * pow(ecc, 6);
 
      /* At t = 0, the n * t term vanishes */
-
+    /* cos(-phi) = cos(phi) and sin(-phi) = -sin(phi), so all sinE gets terms get multiplied by -1. */
     double cosE = c0 + c1 * cos(phi) + c2 * cos(2 * phi) + c3 * cos(3 * phi) + c4 * cos(4 * phi) + c5 * cos(5 * phi) + c6 * cos(6 * phi) + c7 * cos(7 * phi);
 
-    double sinE = s1 * sin(phi) + s2 * sin(2 * phi) + s3 * sin(3 * phi) + s4 * sin(4 * phi) + s5 * sin(5 * phi) + s6 * sin(6 * phi) + s7 * sin(7 * phi);
+    //variable name is sinE for brevity. Mathematically it is sqrt(1-e**2) * sin(E).
+    //double sinE = s1 * sin(phi) + s2 * sin(2 * phi) + s3 * sin(3 * phi) + s4 * sin(4 * phi) + s5 * sin(5 * phi) + s6 * sin(6 * phi) + s7 * sin(7 * phi);
+    double sinE = s1 * -1 * sin(phi) + s2 * -1 * sin(2 * phi) + s3 * -1 * sin(3 * phi) + s4 * -1 * sin(4 * phi) + s5 * -1 * sin(5 * phi) + s6 * -1 * sin(6 * phi) + s7 * -1 * sin(7 * phi);
 
     double zero_offset = a1 * (cos(omega) * cosE + sin(omega) * sinE) * inverse_tsamp;
     unsigned blocks = size/max_threads + 1;
@@ -535,40 +616,22 @@ void device_elliptical_orbit_resampler_approx(float * d_idata, float * d_odata, 
     if (blocks > max_blocks)
         blocks = max_blocks;
         
-        resample_elliptical_approx_kernel<<< blocks,max_threads >>>(d_idata, d_odata,
+        ell8_resampler_kernel<<< blocks,max_threads >>>(d_idata, d_odata,
                          n, a1, phi, omega, ecc, zero_offset, tsamp, inverse_tsamp, 
                          c0, c1, c2, c3, c4, c5, c6, c7, s1, s2, s3, s4, s5, s6, s7, (double) size);
 
-    ErrorChecker::check_cuda_error("Error from device_elliptical_orbit_resampler_approx");
+    ErrorChecker::check_cuda_error("Error from device_ell8_resampler");
 }
 
 //-----Elliptical Orbit Exact Resampler-----//
 
-__device__ double get_roemer_delay_elliptical_exact_value(unsigned long idx, double n, double a1, 
-    double phi_n, double omega, double ecc, double tsamp)
+__device__ double get_bt_model_resampler_idx(unsigned long idx, double n, double a1, 
+    double phi, double omega, double ecc, double tsamp, double inverse_tsamp, double zero_offset)
 
 {
 
-//Do t = 0, calculations first.
-double inverse_tsamp = 1.0 / tsamp;
-double orbital_period_seconds = 2 * M_PI/n;
-double T0_periastron = phi_n * orbital_period_seconds;
-double mean_anomaly_zero = -1 * n * T0_periastron;
-double eccentric_anomaly_zero = mean_anomaly_zero + ecc * sin(mean_anomaly_zero) * (1. + ecc * cos(mean_anomaly_zero));
-//Computing eccentric anomaly at t=0 by iterating kepler's equation
-double du_zero = 1.;
-while(abs(du_zero) > 1.0e-8)
-{
-    du_zero = (mean_anomaly_zero - (eccentric_anomaly_zero - ecc * sin(eccentric_anomaly_zero)))/(1.0 - ecc * cos(eccentric_anomaly_zero));
-    eccentric_anomaly_zero+= du_zero;
-}
-//Calculating the roemer delay at t=0
-double zero_offset = a1  * ((cos(eccentric_anomaly_zero) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly_zero) * cos(omega)) * inverse_tsamp;
-
-
-//double phi = phi_n * 2 * M_PI; // Convert phi_n to radians
-
-double mean_anomaly = n * ((idx * tsamp) - T0_periastron);
+double t = idx * tsamp;
+double mean_anomaly = n * t - phi;
 double eccentric_anomaly = mean_anomaly + ecc * sin(mean_anomaly) * (1. + ecc * cos(mean_anomaly));
 
 //Computing eccentric anomaly by iterating kepler's equation
@@ -587,21 +650,16 @@ double roemer_delay_final = roemer_delay - zero_offset;
 return __double2ull_rn(idx + roemer_delay_final);
 }
 
-// __global__ void remove_roemer_delay_elliptical_exact_kernel(double* device_start_timeseries, 
-//     double* device_roemer_delay_removed_timeseries,
-//     double n, double a1, double phi_n, double omega, double ecc,
-//     double tsamp, double size)
 
-__global__ void remove_roemer_delay_elliptical_exact_kernel(float* d_idata, 
+__global__ void bt_model_resampler_kernel(float* d_idata, 
     float* d_odata,
-    double n, double a1, double phi_n, double omega, double ecc,
-    double tsamp, double size)
+    double n, double a1, double phi, double omega, double ecc,
+    double tsamp, double inverse_tsamp, double size, double zero_offset)
 
 {
 for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
 {
-unsigned long out_idx = get_roemer_delay_elliptical_exact_value(idx, n, a1, phi_n, omega,
-    ecc, tsamp);
+unsigned long out_idx = get_bt_model_resampler_idx(idx, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, zero_offset);
 
     if (out_idx < size)
 {
@@ -617,22 +675,32 @@ else
 }
 }
 
-// void device_remove_roemer_delay_elliptical_exact(double* start_timeseries_array, double* roemer_delay_removed_timeseries_array,
-//     double n, double a1, double phi_n, double omega, double ecc, 
-//     double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
-void device_remove_roemer_delay_elliptical_exact(float* d_idata, float* d_odata,
-    double n, double a1, double phi_n, double omega, double ecc, 
-    double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
+
+void device_bt_model_resampler(float* d_idata, float* d_odata,
+    double n, double a1, double phi, double omega, double ecc, 
+    double tsamp, double inverse_tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
 {
+
+//Calculating the zero offset
+double mean_anomaly_t0 = -1 * phi;
+double eccentric_anomaly_t0 = mean_anomaly_t0 + ecc * sin(mean_anomaly_t0) * (1. + ecc * cos(mean_anomaly_t0));
+//Computing eccentric anomaly at t=0 by iterating kepler's equation
+double du_t0 = 1.;
+while(abs(du_t0) > 1.0e-8)
+{
+    du_t0 = (mean_anomaly_t0 - (eccentric_anomaly_t0 - ecc * sin(eccentric_anomaly_t0)))/(1.0 - ecc * cos(eccentric_anomaly_t0));
+    eccentric_anomaly_t0+= du_t0;
+}
+//Calculating the roemer delay at t=0 and converting to bins
+double zero_offset = a1  * ((cos(eccentric_anomaly_t0) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly_t0) * cos(omega)) * inverse_tsamp;
 
  unsigned blocks = size/max_threads + 1;
  if (blocks > max_blocks)
    blocks = max_blocks;
 
- remove_roemer_delay_elliptical_exact_kernel<<< blocks,max_threads >>>(d_idata, d_odata, n,
- a1, phi_n, omega, ecc, tsamp, (double) size);
+ bt_model_resampler_kernel<<< blocks,max_threads >>>(d_idata, d_odata, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, (double) size, zero_offset);
 
- ErrorChecker::check_cuda_error("Error from device_remove_roemer_delay_elliptical_exact");
+ ErrorChecker::check_cuda_error("Error from device_bt_model_resampler");
 }
 //------------ 1D LERP RESAMPLER----------------//
 

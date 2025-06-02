@@ -6,6 +6,8 @@
 #include <iterator>
 #include <stdexcept>
 #include <iostream>
+#include <map>
+#include <cctype>
 
 class Keplerian_TemplateBank_Reader {
 private:
@@ -16,6 +18,9 @@ private:
   std::vector<double> ecc;                // eccentricity
   int columns = 0;
 
+  // store every “# KEY: VALUE” line here
+  std::map<std::string, std::string> metadata;
+
   static bool is_comment(const std::string& line) {
     return !line.empty() && line[0] == '#';
   }
@@ -23,6 +28,14 @@ private:
   static std::vector<std::string> split(const std::string& s) {
     std::stringstream ss(s);
     return {std::istream_iterator<std::string>(ss), std::istream_iterator<std::string>()};
+  }
+
+  // Helper: trim whitespace from front/back
+  static std::string trim(const std::string& s) {
+    size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
   }
 
 public:
@@ -35,7 +48,20 @@ public:
     ErrorChecker::check_file_error(in, filename);
     std::string line;
     while (std::getline(in, line)) {
-      if (is_comment(line)) continue;
+      if (is_comment(line)) {
+        // Remove leading '#', then parse "KEY: VALUE"
+        std::string rest = line.substr(1);
+        rest = trim(rest);
+        auto colon = rest.find(':');
+        if (colon != std::string::npos) {
+          std::string key   = trim(rest.substr(0, colon));
+          std::string value = trim(rest.substr(colon + 1));
+          if (!key.empty()) {
+            metadata[key] = value;
+          }
+        }
+        continue;
+      }
       auto tokens = split(line);
       if (columns == 0) columns = tokens.size();
       if (tokens.size() == 3) {
@@ -62,4 +88,5 @@ public:
   const std::vector<double>& get_omega() const { return omega; }
   const std::vector<double>& get_ecc() const { return ecc; }
   int get_num_columns() const { return columns; }
+  const std::map<std::string, std::string>& get_metadata() const { return metadata; }
 };

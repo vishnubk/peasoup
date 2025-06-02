@@ -79,15 +79,20 @@ public:
     root.append(header);
   }
 
-  void add_segment_parameters(SigprocFilterbank& f){
+  void add_segment_parameters(SigprocFilterbank& f, CmdLineOptions& args){
     XML::Element segment_parameters("segment_parameters");
     segment_parameters.append(XML::Element("segment_start_sample", f.get_start_sample()));
     segment_parameters.append(XML::Element("segment_nsamples", f.get_effective_nsamps()));
-    segment_parameters.append(XML::Element("segment_pepoch", f.get_segment_pepoch()));
+
+    if (args.keplerian_tb_file != "none") {
+            segment_parameters.append(XML::Element("segment_pepoch", f.get_segment_pepoch_template_bank()));
+    } else {
+            segment_parameters.append(XML::Element("segment_pepoch", f.get_segment_pepoch_accel_search()));
+    }
     root.append(segment_parameters);
   }
 
-  void add_search_parameters(CmdLineOptions& args){
+  void add_search_parameters(CmdLineOptions& args, const Keplerian_TemplateBank_Reader* tb_reader = nullptr){
     XML::Element search_options("search_parameters");
     search_options.append(XML::Element("infilename",args.infilename));
     search_options.append(XML::Element("outdir",args.outdir));
@@ -116,6 +121,30 @@ public:
     search_options.append(XML::Element("freq_tol",args.freq_tol));
     search_options.append(XML::Element("verbose",args.verbose));
     search_options.append(XML::Element("progress_bar",args.progress_bar));
+    search_options.append(XML::Element("template_bank_file", args.keplerian_tb_file));
+    
+    if (tb_reader != nullptr) {
+      for (auto const& kv : tb_reader->get_metadata()) {
+        std::string raw_key = kv.first;     
+        std::string raw_val = kv.second;    
+        // Clean the key:
+        std::string cleaned_key;
+        for (char c : raw_key) {
+          if (std::isspace((unsigned char)c)) {
+            cleaned_key.push_back('_');
+          }
+          else if (c == '(' || c == ')') {
+            // drop parentheses
+          }
+          else {
+            cleaned_key.push_back(
+              static_cast<char>(std::tolower((unsigned char)c)));
+          }
+        }
+        search_options.append(XML::Element(cleaned_key, raw_val));
+      }
+    }
+    
     root.append(search_options);
   }
 

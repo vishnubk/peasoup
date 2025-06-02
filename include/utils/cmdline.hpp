@@ -38,6 +38,8 @@ struct CmdLineOptions {
   long nsamples;
   std::string timeseries_dump_dir;
   bool no_search;
+  bool distill_circular_orbit_cands;
+  bool single_precision_harmonic_sums;
   std::string keplerian_tb_file;
 
 };
@@ -80,7 +82,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
 {
   try
     {
-      TCLAP::CmdLine cmd("Template Bank Peasoup - a GPU pulsar search pipeline that performs Polynomial and Keplerian parameter searches", ' ', "1.0");
+      TCLAP::CmdLine cmd("Cocktail Soup - a GPU pulsar search pipeline that performs Polynomial and Keplerian parameter searches", ' ', "1.0");
 
       TCLAP::ValueArg<std::string> arg_infilename("i", "inputfile",
 						  "File to process (.fil)",
@@ -210,9 +212,12 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
         "dump dedispersed time series to this directory",
         false, "", "string",cmd);
 
-       TCLAP::SwitchArg arg_no_search("", "nosearch", "Do not search while dumping timeseries, no effect otherwise", cmd);
+      TCLAP::SwitchArg arg_no_search("", "nosearch", "Do not search while dumping timeseries, no effect otherwise", cmd);
+      TCLAP::SwitchArg arg_distill_circular_orbit_cands("", "distill_circular_orbit_cands", "Distill candidates from circular orbit searches", cmd);
+      TCLAP::SwitchArg arg_single_precision_harmonic_sums("", "single_precision_harmonic_sums", "Perform harmonic sums with single precision instead of double.", cmd);
 
-       TCLAP::ValueArg<std::string> arg_keplerian_template_bank_filename("K", "keplerian_templates",
+
+      TCLAP::ValueArg<std::string> arg_keplerian_template_bank_filename("K", "keplerian_templates",
                                                                          "filename of keplerian template bank",
                                                                          false, "none", "string", cmd);
       
@@ -252,6 +257,8 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       args.nsamples           = arg_nsamples.getValue();
       args.timeseries_dump_dir = arg_timeseries_dump_dir.getValue();
       args.no_search         = arg_no_search.getValue();
+      args.distill_circular_orbit_cands = arg_distill_circular_orbit_cands.getValue();
+      args.single_precision_harmonic_sums = arg_single_precision_harmonic_sums.getValue();
       args.keplerian_tb_file = arg_keplerian_template_bank_filename.getValue();
 
 

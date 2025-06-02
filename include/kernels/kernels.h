@@ -105,6 +105,7 @@ void device_harmonic_sum(float* d_input_array,
 			 float** d_output_array,
 			 size_t size, 
 			 unsigned nharms,
+             bool single_precision,
 			 unsigned int max_blocks,
 			 unsigned int max_threads);
 
@@ -133,27 +134,21 @@ void device_resampleII(float * d_idata,
 
 void device_circular_orbit_resampler(float * d_idata, 
                                     float * d_odata, 
-                                    double n, double a1, double phi, double zero_offset, double tsamp, double inverse_tsamp,  
+                                    double n, double a1, double phi, double tsamp, double inverse_tsamp,  
                                     size_t size, unsigned int max_threads, unsigned int max_blocks);
 
-void device_elliptical_orbit_resampler_approx(float * d_idata, 
-                                            float * d_odata, 
-                                            double n, double a1, double phi, double omega, double ecc, 
-                                            double tsamp, double inverse_tsamp, size_t size, 
-                                            unsigned int max_threads, unsigned int max_blocks);
+void device_ell8_resampler(float * d_idata, 
+                        float * d_odata, 
+                        double n, double a1, double phi, double omega, double ecc, 
+                        double tsamp, double inverse_tsamp, size_t size, 
+                        unsigned int max_threads, unsigned int max_blocks);
 
 
-// void device_remove_roemer_delay_elliptical_exact(double* start_timeseries_array, double* roemer_delay_removed_timeseries_array,
-//     double n, double a1, double phi_n, double omega, double ecc, 
-//     double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
 
-void device_remove_roemer_delay_elliptical_exact(float* d_idata, float* d_odata,
-    double n, double a1, double phi_n, double omega, double ecc, 
-    double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
+void device_bt_model_resampler(float* d_idata, float* d_odata,
+    double n, double a1, double phi, double omega, double ecc, 
+    double tsamp, double inverse_tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
 
-// void device_resample_using_1D_lerp(double *device_roemer_delay_removed_timeseries, float  *input_d, 
-//     unsigned long xp_len, unsigned long x_len, double *output_samples_array, float *output_d,
-//     unsigned int max_threads, unsigned int max_blocks);
 
 int device_find_peaks(int n,
 		      int start_index,

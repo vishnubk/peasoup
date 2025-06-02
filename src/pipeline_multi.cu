@@ -245,86 +245,22 @@ void run_circular_orbit_search_resampler(
     if (args.verbose) std::cout << "Resampling complete\n"; 
 }
 
-void run_elliptical_orbit_search_resampler_approx(
+void run_elliptical_orbit_search_resampler(
     ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
     DeviceTimeSeries<float>& d_tim_resampled, unsigned int size,
     double n, double a1, double phi, double omega, double ecc,
     double tsamp, double inverse_tsamp) {
     if (args.verbose) std::cout << "Resampling to elliptical orbit with n=" << n << ", a1=" << a1 << ", phi=" << phi << ", omega=" << omega << ", ecc=" << ecc << "\n";
     TimeDomainResampler resampler;
-    std::cout << "tsamp: " << tsamp << ", inverse_tsamp: " << inverse_tsamp << std::endl;
-    //resampler.elliptical_orbit_resampler_approx(d_tim, d_tim_resampled, size, n, a1, phi, omega, ecc, tsamp, inverse_tsamp);
-    double phi_n = phi/(2 * M_PI);
-    std::cout << "phi_n: " << phi_n << std::endl;
-    resampler.remove_roemer_delay_elliptical_exact(d_tim, d_tim_resampled, size, n, a1, phi_n, omega, ecc, tsamp);
+    if (ecc >= 0.8) {
+        if (args.verbose) std::cout << "Using BT model resampler for high eccentricity orbit\n";
+        resampler.bt_model_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
+    }
+    else {
+        if (args.verbose) std::cout << "Using ELL8 resampler for low eccentricity orbit\n";
+        resampler.ell8_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
+    }
 }
-
-// void run_elliptical_orbit_search_resampler_exact(
-//     ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
-//     DeviceTimeSeries<float>& d_tim_resampled, unsigned int size,
-//     double n, double a1, double phi, double omega, double ecc,
-//     double tsamp, double inverse_tsamp) {
-//     if (args.verbose) std::cout << "Resampling to elliptical orbit with n=" << n << ", a1=" << a1 << ", phi=" << phi << ", omega=" << omega << ", ecc=" << ecc << "\n";
-//     TimeDomainResampler resampler;
-
-//     unsigned long samples_in_data = trials.get_nsamps();
-//     unsigned long total_samples = size;
-
-//     double normalised_n = n/(2 * M_PI);
-//     double phi_n = phi/(2 * M_PI);
-//     double pb = 2 * M_PI/n;
-//     double pb_days = pb/86400.;
-//     double tstart = 50000; // This is a placeholder for the start time in days, adjust as needed
-//     double T0 = tstart + (phi_n * pb_days);
-//     double total_orbits = normalised_n * ((tstart - T0) * 86400.);
-//     double minele, maxele;
-
-//     if (total_orbits < 0) 
-//     {	
-//         total_orbits = total_orbits + abs(int(total_orbits)) + 1;
-//     }
-//     else if (total_orbits > 1)
-//     {
-//         total_orbits = total_orbits - int(total_orbits);
-
-//     }
-//     double start_time = total_orbits * pb;
-//     thrust::host_vector<double> start_timeseries(total_samples);
-//     thrust::host_vector<double> output_samples(size);
-//     thrust::sequence(start_timeseries.begin(), start_timeseries.end(), start_time, tsamp);
-    
-
-//     thrust::host_vector<double> roemer_delay_removed_timeseries(total_samples);
-
-//     thrust::device_vector<double> device_start_timeseries = start_timeseries;
-//     thrust::device_vector<double> device_roemer_delay_removed_timeseries = roemer_delay_removed_timeseries;
-
-//     /* Thrust vectors cannot be directly passed onto cuda kernels. Hence you need to cast them as raw pointers */
-//     double* start_timeseries_array = thrust::raw_pointer_cast(device_start_timeseries.data());
-//     double* roemer_delay_removed_timeseries_array = thrust::raw_pointer_cast(device_roemer_delay_removed_timeseries.data());
-
-//     resampler.remove_roemer_delay_elliptical_exact(
-//         start_timeseries_array, roemer_delay_removed_timeseries_array, size, n, a1, phi, omega, ecc, tsamp);
-
-//     find_min_max(device_roemer_delay_removed_timeseries, &minele, &maxele);
-
-//     /* Using minimum value of roemer delay, now generate your output samples.
-//                 say minimum is 5400.0, array is then 5400, 5400 + tsamp, 5400 + 2*.tsamp + ... 5400 + (total_samples - 1) * tsamp */ 
-
-
-//     thrust::sequence(output_samples.begin(), output_samples.end(), minele, tsamp);
-//     thrust::device_vector<double> device_output_samples_array = output_samples;
-//     double* output_samples_array = thrust::raw_pointer_cast(device_output_samples_array.data());
-
-//     resampler.resample_using_1D_lerp(roemer_delay_removed_timeseries_array, d_tim, size, size, 
-//         output_samples_array, d_tim_resampled);
-
-//     if (args.verbose) std::cout << "Resampling complete\n"; 
-// }
-
-
-
-
        
 void run_keplerian_search(int idx,
     Keplerian_TemplateBank_Reader& keplerian_tb,
@@ -355,9 +291,7 @@ void run_keplerian_search(int idx,
 
         if (elliptical_orbit_search) {
 
-            run_elliptical_orbit_search_resampler_approx(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
-
-            //run_elliptical_orbit_search_resampler_exact(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
+            run_elliptical_orbit_search_resampler(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
             SearchParams elliptical_orbit_search;
 
             elliptical_orbit_search.n = n[kk];
@@ -372,7 +306,6 @@ void run_keplerian_search(int idx,
                 keplerian_search_cands, mean, std, size);
         }
         else {
-  
             run_circular_orbit_search_resampler(d_tim, d_tim_resampled, size,  n[kk], a1[kk], phi[kk], tsamp, inverse_tsamp);
             SearchParams circular_orbit_search;
             circular_orbit_search.n = n[kk];
@@ -384,6 +317,7 @@ void run_keplerian_search(int idx,
                 d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
                 sums, harm_folder, cand_finder, harm_finder, trial_cands,
                 keplerian_search_cands, mean, std, size);
+            
         }
     }
 }
@@ -433,10 +367,18 @@ public:
     SpectrumFormer former;
     PeakFinder cand_finder(args.min_snr,args.min_freq,args.max_freq,size);
     HarmonicSums<float> sums(d_pspec,args.nharmonics);
-    HarmonicFolder harm_folder(sums);
+    HarmonicFolder harm_folder(sums, args.single_precision_harmonic_sums);
     HarmonicDistiller harm_finder(args.freq_tol,args.max_harm,false);
     float mean,std,rms;
     int idx;
+
+    if(args.single_precision_harmonic_sums){
+        if (args.verbose) std::cout << "Using single precision harmonic sums\n";
+    }else {
+        if (args.verbose) std::cout << "Using double precision harmonic sums\n";
+    }
+    
+    
 
     // Set up zapper if requested
     Zapper* bzap = nullptr; 
@@ -462,7 +404,6 @@ public:
 
         if (keplerian_tb) {
             
-
             if (args.verbose) std::cout << "Searching Keplerian templates for DM " << tim.get_dm() << "\n";
 
             CandidateCollection keplerian_search_cands;
@@ -472,8 +413,14 @@ public:
                 r2cfft, c2rfft, d_fseries, d_pspec, former, sums, harm_folder,
                 cand_finder, harm_finder, mean, std, size, tsamp, inverse_tsamp);
             
-            dm_trial_cands.append(keplerian_search_cands.cands);
-
+            if (args.distill_circular_orbit_cands) {
+                if (args.verbose) std::cout << "Distilling circular orbit candidates\n";
+                Template_Bank_Circular_Distiller circular_distiller(args.freq_tol,true);
+                dm_trial_cands.append(circular_distiller.distill(keplerian_search_cands.cands));
+            } else {
+                if (args.verbose) std::cout << "Not distilling circular orbit candidates\n";
+                dm_trial_cands.append(keplerian_search_cands.cands);
+            }
         }
 
         else {
@@ -779,8 +726,12 @@ int main(int argc, char **argv)
   OutputFileWriter stats;
   stats.add_misc_info();
   stats.add_header(filename);
-  stats.add_search_parameters(args);
-  stats.add_segment_parameters(filobj);
+  if (keplerian_tb) {
+    stats.add_search_parameters(args, &*keplerian_tb);
+  } else {
+    stats.add_search_parameters(args, nullptr);
+  }
+  stats.add_segment_parameters(filobj, args);
   stats.add_dm_list(full_dm_list);
 
   std::vector<float> acc_list;

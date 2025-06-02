@@ -332,13 +332,20 @@ public:
 
 
 
-  double get_segment_pepoch() {
+  double get_segment_pepoch_accel_search() {
     double start_time = this->start_sample * this->tsamp / 86400.0;
     double end_time = this->size  * this->tsamp / 86400.0;
     double tstart_updated =  this->_header.tstart + start_time;
     
     //if start sample > 0 tstart has been updated, so get middle of observation.
     return tstart_updated + 0.5 * end_time;
+}
+
+double get_segment_pepoch_template_bank() {
+    double start_time = this->start_sample * this->tsamp / 86400.0;
+    double tstart_updated =  this->_header.tstart + start_time;
+    //Template bank pepoch is start of the observation/segment
+    return tstart_updated;
 }
 
 
