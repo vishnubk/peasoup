@@ -607,7 +607,6 @@ void device_ell8_resampler(float * d_idata, float * d_odata, double n, double a1
     double cosE = c0 + c1 * cos(phi) + c2 * cos(2 * phi) + c3 * cos(3 * phi) + c4 * cos(4 * phi) + c5 * cos(5 * phi) + c6 * cos(6 * phi) + c7 * cos(7 * phi);
 
     //variable name is sinE for brevity. Mathematically it is sqrt(1-e**2) * sin(E).
-    //double sinE = s1 * sin(phi) + s2 * sin(2 * phi) + s3 * sin(3 * phi) + s4 * sin(4 * phi) + s5 * sin(5 * phi) + s6 * sin(6 * phi) + s7 * sin(7 * phi);
     double sinE = s1 * -1 * sin(phi) + s2 * -1 * sin(2 * phi) + s3 * -1 * sin(3 * phi) + s4 * -1 * sin(4 * phi) + s5 * -1 * sin(5 * phi) + s6 * -1 * sin(6 * phi) + s7 * -1 * sin(7 * phi);
 
     double zero_offset = a1 * (cos(omega) * cosE + sin(omega) * sinE) * inverse_tsamp;

@@ -38,6 +38,7 @@ RUN git clone https://github.com/vishnubk/dedisp.git && \
 
 RUN git clone https://github.com/vishnubk/peasoup.git && \
     cd peasoup && \
+    git checkout keplerian && \
     make -j 32 && \
     make install
 
