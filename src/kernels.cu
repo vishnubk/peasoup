@@ -674,7 +674,6 @@ else
 }
 }
 
-
 void device_bt_model_resampler(float* d_idata, float* d_odata,
     double n, double a1, double phi, double omega, double ecc, 
     double tsamp, double inverse_tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
@@ -701,6 +700,64 @@ double zero_offset = a1  * ((cos(eccentric_anomaly_t0) - ecc) * sin(omega) + sqr
 
  ErrorChecker::check_cuda_error("Error from device_bt_model_resampler");
 }
+
+//---Interpolator resampler---------------------//
+
+__device__ double get_roemer_delay_bt_model_elliptical(unsigned long idx, double n, double a1, 
+    double phi, double omega, double ecc, double tsamp)
+
+{
+
+double t = idx * tsamp;
+double mean_anomaly = n * t - phi;
+double eccentric_anomaly = mean_anomaly + ecc * sin(mean_anomaly) * (1. + ecc * cos(mean_anomaly));
+
+//Computing eccentric anomaly by iterating kepler's equation
+// initializing to large value
+double du = 1.;
+while(abs(du) > 1.0e-13)
+{
+    du = (mean_anomaly - (eccentric_anomaly - ecc * sin(eccentric_anomaly)))/(1.0 - ecc * cos(eccentric_anomaly));
+    eccentric_anomaly+= du;
+}
+
+double roemer_delay = a1  * ((cos(eccentric_anomaly) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly) * cos(omega));
+
+return roemer_delay;
+}
+
+__global__ void subtract_roemer_delay_bt_model_elliptical_kernel(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
+    double n, double a1, double phi, double omega, double ecc,
+    double tsamp, double size)
+
+{
+for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
+{
+    double roemer_delay = get_roemer_delay_bt_model_elliptical(idx, n, a1, phi, omega, ecc, tsamp);
+    //Subtracting the roemer delay from the binary grid time to get the telescope non-uniform time
+    d_t_telescope_nonuniform_ptr[idx] = d_t_binary_grid_ptr[idx] - roemer_delay; 
+
+
+}
+}
+
+void device_subtract_roemer_delay_elliptical_bt_model(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
+    double n, double a1, double phi, double omega, double ecc, 
+    double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
+{
+
+ unsigned blocks = size/max_threads + 1;
+ if (blocks > max_blocks)
+   blocks = max_blocks;
+
+   subtract_roemer_delay_bt_model_elliptical_kernel<<< blocks,max_threads >>>(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n,
+ a1, phi, omega, ecc, tsamp, (double) size);
+
+ ErrorChecker::check_cuda_error("Error from device_subtract_roemer_delay_elliptical_bt_model");
+}
+
+
+
 //------------ 1D LERP RESAMPLER----------------//
 
 /* 1. Lerp Algorithm equivalent to np.interp and scipy.interpolate.interp1d in python
@@ -708,7 +765,7 @@ double zero_offset = a1  * ((cos(eccentric_anomaly_t0) - ecc) * sin(omega) + sqr
 Definitions:
 xp --> xarray of data --> device_roemer_delay_removed_timeseries
 yp --> yarray of data --> input_d
-x ----> xarray where we want to evaulate the interpolated values ---> output_samples_array
+x ----> xarray where we want to evaulate the interpolated values ---> output_samples_array. For our case size == x_len == size
 y ----> yarray we want to calculate ---> output_d
 size ---> len(xp) == len(yp)
 x_size ---> len(x) 
@@ -735,41 +792,38 @@ __device__ void bsearch_range(double *a, double key, unsigned long len_a, unsign
     return;
     }
 
-__global__ void resample_using_1D_lerp_kernel(double *device_roemer_delay_removed_timeseries, float  *input_d, unsigned long xp_len, unsigned long x_len, double *output_samples_array, float *output_d){
+__global__ void resample_using_1D_lerp_kernel(double *d_t_telescope_nonuniform_ptr, float  *input_d, unsigned long size, double *d_t_binary_target_ptr, float *output_d){
   
-    //for (unsigned long i = threadIdx.x+blockDim.x*blockIdx.x; i < x_len; i+=gridDim.x*blockDim.x){
-    for (unsigned long i = threadIdx.x+blockDim.x*blockIdx.x; i < xp_len; i+=gridDim.x*blockDim.x){
+    for (unsigned long i = threadIdx.x+blockDim.x*blockIdx.x; i < size; i+=gridDim.x*blockDim.x){
     
-      double val = output_samples_array[i];
-      if ((val >= device_roemer_delay_removed_timeseries[0]) && (val <= device_roemer_delay_removed_timeseries[xp_len - 1])){
+      double target_val = d_t_binary_target_ptr[i];
+      if ((target_val > d_t_telescope_nonuniform_ptr[0]) && (target_val <= d_t_telescope_nonuniform_ptr[size - 1])){
         unsigned long idx;
-        bsearch_range(device_roemer_delay_removed_timeseries, val, xp_len, &idx);
-        double xlv = device_roemer_delay_removed_timeseries[idx - 1];
-        double xrv = device_roemer_delay_removed_timeseries[idx];
+        bsearch_range(d_t_telescope_nonuniform_ptr, target_val, size, &idx);
+        double xlv = d_t_telescope_nonuniform_ptr[idx - 1];
+        double xrv = d_t_telescope_nonuniform_ptr[idx];
         double ylv = input_d[idx - 1];
         double yrv = input_d[idx];
 
        // y  =      m                *   x       + b
-       output_d[i] = ((yrv-ylv)/(xrv-xlv)) * (val-xlv) + ylv;
+       output_d[i] = ((yrv-ylv)/(xrv-xlv)) * (target_val-xlv) + ylv;
       }
          
 
     }
-    //Add padding here.
 
   }
 
 
-void device_resample_using_1D_lerp(double *device_roemer_delay_removed_timeseries, float  *input_d, 
-    unsigned long xp_len, unsigned long x_len, double *output_samples_array, float *output_d,
+void device_resample_using_1D_lerp(double *d_t_telescope_nonuniform_ptr, float  *input_d, 
+    unsigned long size, double *d_t_binary_target_ptr, float *output_d,
     unsigned int max_threads, unsigned int max_blocks)
 {
 
-unsigned blocks = xp_len/max_threads + 1;
+unsigned blocks = size/max_threads + 1;
 if (blocks > max_blocks)
   blocks = max_blocks;
-resample_using_1D_lerp_kernel<<< blocks,max_threads >>>(device_roemer_delay_removed_timeseries, input_d, xp_len, 
-                                                       x_len, output_samples_array, output_d);
+resample_using_1D_lerp_kernel<<< blocks,max_threads >>>(d_t_telescope_nonuniform_ptr, input_d, size, d_t_binary_target_ptr, output_d);
 
 ErrorChecker::check_cuda_error("Error from device_resample_using_1D_lerp");
 }
