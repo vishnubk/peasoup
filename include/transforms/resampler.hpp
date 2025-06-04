@@ -57,6 +57,15 @@ void bt_model_resampler(DeviceTimeSeries<float>& input, DeviceTimeSeries<float>&
    device_subtract_roemer_delay_elliptical_bt_model(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n, a1, phi, omega, ecc, tsamp, size, max_threads, max_blocks);
    }
 
+void subtract_roemer_delay_circular(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr, \
+   double n, double a1, double phi, double tsamp, unsigned int size)
+
+   {
+   device_subtract_roemer_delay_circular(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n, a1, phi, tsamp, size, max_threads, max_blocks);
+   }
+
+
+
 void resample_using_1D_lerp(double* d_t_telescope_nonuniform_ptr, DeviceTimeSeries<float>& input,  unsigned long size, double* d_t_binary_target_ptr, DeviceTimeSeries<float>& output)
    {
    device_resample_using_1D_lerp(d_t_telescope_nonuniform_ptr, input.get_data(), size, d_t_binary_target_ptr, output.get_data(), max_threads, max_blocks);

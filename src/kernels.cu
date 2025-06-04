@@ -757,6 +757,47 @@ void device_subtract_roemer_delay_elliptical_bt_model(double* d_t_binary_grid_pt
 }
 
 
+__device__ double get_roemer_delay_circular(unsigned long idx,
+    double n, double a1, double phi, double tsamp)
+
+{
+
+double t = idx * tsamp;
+double mean_anomaly = n * t - phi;
+double sine_mean_anomaly = sin(mean_anomaly);
+double roemer_delay = a1 * sine_mean_anomaly;
+return roemer_delay;
+}
+
+
+__global__ void subtract_roemer_delay_circular_kernel(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
+    double n, double a1, double phi, double tsamp, double size)
+
+{
+for( unsigned long idx = blockIdx.x*blockDim.x + threadIdx.x ; idx < size ; idx += blockDim.x*gridDim.x )
+{
+    double roemer_delay = get_roemer_delay_circular(idx, n, a1, phi, tsamp);
+    //Subtracting the roemer delay from the binary grid time to get the telescope non-uniform time
+    d_t_telescope_nonuniform_ptr[idx] = d_t_binary_grid_ptr[idx] - roemer_delay; 
+
+
+}
+}
+
+void device_subtract_roemer_delay_circular(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
+    double n, double a1, double phi, double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks)
+{
+
+ unsigned blocks = size/max_threads + 1;
+ if (blocks > max_blocks)
+   blocks = max_blocks;
+
+   subtract_roemer_delay_circular_kernel<<< blocks,max_threads >>>(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n,
+ a1, phi, tsamp, (double) size);
+
+ ErrorChecker::check_cuda_error("Error from device_subtract_roemer_delay_circular");
+}
+
 
 //------------ 1D LERP RESAMPLER----------------//
 

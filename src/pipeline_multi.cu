@@ -253,6 +253,24 @@ void run_elliptical_orbit_search_resampler(
     if (args.verbose) std::cout << "Resampling to elliptical orbit with n=" << n << ", a1=" << a1 << ", phi=" << phi << ", omega=" << omega << ", ecc=" << ecc << "\n";
     TimeDomainResampler resampler;
 
+    if (ecc >= 0.8) {
+        if (args.verbose) std::cout << "Using BT model resampler for high eccentricity orbit\n";
+        resampler.bt_model_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
+    }
+    else {
+        if (args.verbose) std::cout << "Using ELL8 resampler for low eccentricity orbit\n";
+        resampler.ell8_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
+       
+    }
+}
+
+void exact_resampler_elliptical(
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled, unsigned int size,
+    double n, double a1, double phi, double omega, double ecc,
+    double tsamp) {
+
+    TimeDomainResampler resampler;
     // Interpolator resampler part.
     double minele, maxele;
     double binary_start_time = phi/n;
@@ -266,31 +284,60 @@ void run_elliptical_orbit_search_resampler(
     /* Thrust vectors cannot be directly passed onto cuda kernels. Hence you need to cast them as raw pointers */
     double* d_t_binary_grid_ptr = thrust::raw_pointer_cast(d_t_binary_grid.data());
     double* d_t_telescope_nonuniform_ptr = thrust::raw_pointer_cast(d_t_telescope_nonuniform.data());
+    resampler.subtract_roemer_delay_elliptical_bt_model(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n, a1, phi, omega, ecc, tsamp, size);
 
-    if (ecc >= 0.8) {
-        if (args.verbose) std::cout << "Using BT model resampler for high eccentricity orbit\n";
-        resampler.bt_model_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
-    }
-    else {
-        if (args.verbose) std::cout << "Using ELL8 resampler for low eccentricity orbit\n";
-        //resampler.ell8_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
-        resampler.subtract_roemer_delay_elliptical_bt_model(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n, a1, phi, omega, ecc, tsamp, size);
-        
-        // Find min. and max. of the telescope arrival time non-uniform grid. We only use the min.
-        find_min_max(d_t_telescope_nonuniform, &minele, &maxele);
-        if (args.verbose) std::cout << "Roemer delay min: " << minele << ", max: " << maxele << "\n";
-        /* Using minimum value of roemer delay, now generate your output samples.
-        say minimum is 5400.0, array is then 5400, 5400 + tsamp, 5400 + 2*.tsamp + ... 5400 + (total_samples - 1) * tsamp */ 
+    // Find min. and max. of the telescope arrival time non-uniform grid. We only use the min.
+    find_min_max(d_t_telescope_nonuniform, &minele, &maxele);
+    if (args.verbose) std::cout << "Roemer delay min: " << minele << ", max: " << maxele << "\n";
+    /* Using minimum value of roemer delay, now generate your output samples.
+    say minimum is 5400.0, array is then 5400, 5400 + tsamp, 5400 + 2*.tsamp + ... 5400 + (total_samples - 1) * tsamp */ 
 
-        thrust::host_vector<double> t_binary_target(size);
-        // Using the minima of d_t_telescope_nonuniform, our goal now is to create a target uniform grid separated every tsamp seconds.
-        thrust::sequence(t_binary_target.begin(), t_binary_target.end(), minele, tsamp);
-        thrust::device_vector<double> d_t_binary_target = t_binary_target;
-        double* d_t_binary_target_ptr = thrust::raw_pointer_cast(d_t_binary_target.data());
-        resampler.resample_using_1D_lerp(d_t_telescope_nonuniform_ptr, d_tim, size, d_t_binary_target_ptr, d_tim_resampled);
-
-    }
+    thrust::host_vector<double> t_binary_target(size);
+    // Using the minima of d_t_telescope_nonuniform, our goal now is to create a target uniform grid separated every tsamp seconds.
+    thrust::sequence(t_binary_target.begin(), t_binary_target.end(), minele, tsamp);
+    thrust::device_vector<double> d_t_binary_target = t_binary_target;
+    double* d_t_binary_target_ptr = thrust::raw_pointer_cast(d_t_binary_target.data());
+    resampler.resample_using_1D_lerp(d_t_telescope_nonuniform_ptr, d_tim, size, d_t_binary_target_ptr, d_tim_resampled);
 }
+
+void exact_resampler_circular(
+    ReusableDeviceTimeSeries<float, DedispOutputType>& d_tim,
+    DeviceTimeSeries<float>& d_tim_resampled, unsigned int size,
+    double n, double a1, double phi,
+    double tsamp) {
+
+    // Only the roemer delay part is different for circular orbit.
+
+    TimeDomainResampler resampler;
+    // Interpolator resampler part.
+    double minele, maxele;
+    double binary_start_time = phi/n;
+    thrust::host_vector<double> t_binary_grid(size);
+    //Create a uniform grid every tsamp seconds from binary_start_time
+    thrust::sequence(t_binary_grid.begin(), t_binary_grid.end(), binary_start_time, tsamp);
+    thrust::device_vector<double> d_t_binary_grid = t_binary_grid;
+    // t_telescope_nonuniform is the arrival time of the signal at the telescope after subtracting roemer delay. This is a non-uniform grid.
+    thrust::host_vector<double> t_telescope_nonuniform(size);
+    thrust::device_vector<double> d_t_telescope_nonuniform = t_telescope_nonuniform;
+    /* Thrust vectors cannot be directly passed onto cuda kernels. Hence you need to cast them as raw pointers */
+    double* d_t_binary_grid_ptr = thrust::raw_pointer_cast(d_t_binary_grid.data());
+    double* d_t_telescope_nonuniform_ptr = thrust::raw_pointer_cast(d_t_telescope_nonuniform.data());
+    resampler.subtract_roemer_delay_circular(d_t_binary_grid_ptr, d_t_telescope_nonuniform_ptr, n, a1, phi, tsamp, size);
+    // Find min. and max. of the telescope arrival time non-uniform grid. We only use the min.
+    find_min_max(d_t_telescope_nonuniform, &minele, &maxele);
+    if (args.verbose) std::cout << "Roemer delay min: " << minele << ", max: " << maxele << "\n";
+    /* Using minimum value of roemer delay, now generate your output samples.
+    say minimum is 5400.0, array is then 5400, 5400 + tsamp, 5400 + 2*.tsamp + ... 5400 + (total_samples - 1) * tsamp */ 
+
+    thrust::host_vector<double> t_binary_target(size);
+    // Using the minima of d_t_telescope_nonuniform, our goal now is to create a target uniform grid separated every tsamp seconds.
+    thrust::sequence(t_binary_target.begin(), t_binary_target.end(), minele, tsamp);
+    thrust::device_vector<double> d_t_binary_target = t_binary_target;
+    double* d_t_binary_target_ptr = thrust::raw_pointer_cast(d_t_binary_target.data());
+    resampler.resample_using_1D_lerp(d_t_telescope_nonuniform_ptr, d_tim, size, d_t_binary_target_ptr, d_tim_resampled);
+}
+
+
        
 void run_keplerian_search(int idx,
     Keplerian_TemplateBank_Reader& keplerian_tb,
@@ -317,11 +364,19 @@ void run_keplerian_search(int idx,
     const auto& omega  = keplerian_tb.get_omega();
     const auto& ecc  = keplerian_tb.get_ecc();
 
-    for (size_t kk = 0; kk < a1.size(); ++kk) {
+    if (elliptical_orbit_search) {
 
-        if (elliptical_orbit_search) {
+        for (size_t kk = 0; kk < a1.size(); ++kk) {
 
-            run_elliptical_orbit_search_resampler(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
+            if (args.exact_resampler) {
+                if (args.verbose) std::cout << "Using exact BT model LERP resampler for elliptical orbit search\n";
+                exact_resampler_elliptical(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp);     
+            }
+            else {
+                if (args.verbose) std::cout << "Using nearest neighbour resampler for elliptical orbit search\n";
+                run_elliptical_orbit_search_resampler(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
+            }
+
             SearchParams elliptical_orbit_search;
 
             elliptical_orbit_search.n = n[kk];
@@ -335,8 +390,19 @@ void run_keplerian_search(int idx,
                 sums, harm_folder, cand_finder, harm_finder, trial_cands,
                 keplerian_search_cands, mean, std, size);
         }
-        else {
-            run_circular_orbit_search_resampler(d_tim, d_tim_resampled, size,  n[kk], a1[kk], phi[kk], tsamp, inverse_tsamp);
+    }
+    else {
+        for (size_t kk = 0; kk < a1.size(); ++kk) {
+
+            if (args.exact_resampler) {
+                if (args.verbose) std::cout << "Using exact LERP resampler for circular orbit search\n";
+                exact_resampler_circular(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], tsamp);
+
+            }
+            else {
+                if (args.verbose) std::cout << "Using nearest neighbour resampler for circular orbit search\n";
+                run_circular_orbit_search_resampler(d_tim, d_tim_resampled, size,  n[kk], a1[kk], phi[kk], tsamp, inverse_tsamp);
+            }
             SearchParams circular_orbit_search;
             circular_orbit_search.n = n[kk];
             circular_orbit_search.a1 = a1[kk];
@@ -351,6 +417,7 @@ void run_keplerian_search(int idx,
         }
     }
 }
+
 
 public:
   CandidateCollection dm_trial_cands;

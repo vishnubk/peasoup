@@ -153,7 +153,10 @@ void device_bt_model_resampler(float* d_idata, float* d_odata,
 void device_subtract_roemer_delay_elliptical_bt_model(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
     double n, double a1, double phi, double omega, double ecc, 
     double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
-    
+
+void device_subtract_roemer_delay_circular(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
+    double n, double a1, double phi, double tsamp, unsigned int size, unsigned int max_threads, unsigned int max_blocks);
+        
 void device_resample_using_1D_lerp(double *d_t_telescope_nonuniform_ptr, float  *input_d, 
     unsigned long size, double *d_t_binary_target_ptr, float *output_d,
     unsigned int max_threads, unsigned int max_blocks);
