@@ -225,13 +225,14 @@ public:
     XML::Element cands("candidates");
     for (int ii=0;ii<candidates.size();ii++){
       XML::Element cand("candidate");
+      double pb_days = (candidates[ii].n > 0) ? (2.0 * M_PI) / (candidates[ii].n * 86400.0) : 0;
       cand.add_attribute("id",ii);
       cand.append(XML::Element("period",1.0/candidates[ii].freq));
       cand.append(XML::Element("opt_period",candidates[ii].opt_period));
       cand.append(XML::Element("dm",candidates[ii].dm));
       cand.append(XML::Element("acc",candidates[ii].acc));
       cand.append(XML::Element("jerk",candidates[ii].jerk));
-      cand.append(XML::Element("n",candidates[ii].n));
+      cand.append(XML::Element("pb",pb_days));
       cand.append(XML::Element("a1",candidates[ii].a1));
       cand.append(XML::Element("phi",candidates[ii].phi));
       cand.append(XML::Element("omega",candidates[ii].omega));

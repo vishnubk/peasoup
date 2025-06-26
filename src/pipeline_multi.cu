@@ -364,60 +364,78 @@ void run_keplerian_search(int idx,
     const auto& omega  = keplerian_tb.get_omega();
     const auto& ecc  = keplerian_tb.get_ecc();
 
+
     if (elliptical_orbit_search) {
-
-        for (size_t kk = 0; kk < a1.size(); ++kk) {
-
-            if (args.exact_resampler) {
+        if (args.exact_resampler) {
                 if (args.verbose) std::cout << "Using exact BT model LERP resampler for elliptical orbit search\n";
-                exact_resampler_elliptical(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp);     
+                for (size_t kk = 0; kk < a1.size(); ++kk) {
+                    exact_resampler_elliptical(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp);
+                    SearchParams elliptical_orbit_search;
+                    elliptical_orbit_search.n = n[kk];
+                    elliptical_orbit_search.a1 = a1[kk];
+                    elliptical_orbit_search.phi = phi[kk];
+                    elliptical_orbit_search.omega = omega[kk];
+                    elliptical_orbit_search.ecc = ecc[kk];
+                    SpectrumCandidates trial_cands(tim.get_dm(), idx, elliptical_orbit_search);
+                    run_search_and_find_candidates(
+                        d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+                        sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                        keplerian_search_cands, mean, std, size);     
             }
-            else {
-                if (args.verbose) std::cout << "Using nearest neighbour resampler for elliptical orbit search\n";
-                run_elliptical_orbit_search_resampler(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
-            }
-
-            SearchParams elliptical_orbit_search;
-
-            elliptical_orbit_search.n = n[kk];
-            elliptical_orbit_search.a1 = a1[kk];
-            elliptical_orbit_search.phi = phi[kk];
-            elliptical_orbit_search.omega = omega[kk];
-            elliptical_orbit_search.ecc = ecc[kk];
-            SpectrumCandidates trial_cands(tim.get_dm(), idx, elliptical_orbit_search);
-            run_search_and_find_candidates(
-                d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-                sums, harm_folder, cand_finder, harm_finder, trial_cands,
-                keplerian_search_cands, mean, std, size);
         }
-    }
-    else {
-        for (size_t kk = 0; kk < a1.size(); ++kk) {
+        else {
+            if (args.verbose) std::cout << "Using nearest neighbour resampler for elliptical orbit search\n";
+            for (size_t kk = 0; kk < a1.size(); ++kk) {
+                run_elliptical_orbit_search_resampler(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], omega[kk], ecc[kk], tsamp, inverse_tsamp);
+                SearchParams elliptical_orbit_search;
+                elliptical_orbit_search.n = n[kk];
+                elliptical_orbit_search.a1 = a1[kk];
+                elliptical_orbit_search.phi = phi[kk];
+                elliptical_orbit_search.omega = omega[kk];
+                elliptical_orbit_search.ecc = ecc[kk];
+                SpectrumCandidates trial_cands(tim.get_dm(), idx, elliptical_orbit_search);
+                run_search_and_find_candidates(
+                    d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+                    sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                    keplerian_search_cands, mean, std, size);
+            }
+        }
 
-            if (args.exact_resampler) {
+    }
+    // Circular orbit search
+    else {
+        if (args.exact_resampler) {
+            for (size_t kk = 0; kk < a1.size(); ++kk) {
                 if (args.verbose) std::cout << "Using exact LERP resampler for circular orbit search\n";
                 exact_resampler_circular(d_tim, d_tim_resampled, size, n[kk], a1[kk], phi[kk], tsamp);
-
+                SearchParams circular_orbit_search;
+                circular_orbit_search.n = n[kk];
+                circular_orbit_search.a1 = a1[kk];
+                circular_orbit_search.phi = phi[kk];
+                SpectrumCandidates trial_cands(tim.get_dm(), idx, circular_orbit_search);
+                run_search_and_find_candidates(
+                    d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+                    sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                    keplerian_search_cands, mean, std, size);
             }
-            else {
+        }
+        else {
+            for (size_t kk = 0; kk < a1.size(); ++kk) {
                 if (args.verbose) std::cout << "Using nearest neighbour resampler for circular orbit search\n";
                 run_circular_orbit_search_resampler(d_tim, d_tim_resampled, size,  n[kk], a1[kk], phi[kk], tsamp, inverse_tsamp);
+                SearchParams circular_orbit_search;
+                circular_orbit_search.n = n[kk];
+                circular_orbit_search.a1 = a1[kk];
+                circular_orbit_search.phi = phi[kk];
+                SpectrumCandidates trial_cands(tim.get_dm(), idx, circular_orbit_search);
+                run_search_and_find_candidates(
+                    d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
+                    sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                    keplerian_search_cands, mean, std, size);
             }
-            SearchParams circular_orbit_search;
-            circular_orbit_search.n = n[kk];
-            circular_orbit_search.a1 = a1[kk];
-            circular_orbit_search.phi = phi[kk];
-            SpectrumCandidates trial_cands(tim.get_dm(), idx, circular_orbit_search);
-
-            run_search_and_find_candidates(
-                d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-                sums, harm_folder, cand_finder, harm_finder, trial_cands,
-                keplerian_search_cands, mean, std, size);
-            
         }
     }
 }
-
 
 public:
   CandidateCollection dm_trial_cands;
