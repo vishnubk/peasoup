@@ -19,9 +19,9 @@
 #include <utils/utils.hpp>
 #include <utils/stats.hpp>
 #include <utils/stopwatch.hpp>
-#include <utils/progress_bar.hpp>
 #include <utils/cmdline.hpp>
 #include <utils/output_stats.hpp>
+#include <utils/progress_monitor.hpp>
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -47,46 +47,30 @@ private:
   pthread_mutex_t mutex;
   int dm_idx;
   int count;
-  ProgressBar* progress;
-  bool use_progress_bar;
+  ProgressMonitor* prog;
 
 public:
-  DMDispenser(DispersionTrials<DedispOutputType>& trials)
-    :trials(trials),dm_idx(0),use_progress_bar(false){
+  DMDispenser(DispersionTrials<DedispOutputType>& trials, ProgressMonitor* pm = nullptr)
+    :trials(trials),dm_idx(0), prog(pm){
     count = trials.get_count();
     pthread_mutex_init(&mutex, NULL);
-  }
-
-  void enable_progress_bar(){
-    progress = new ProgressBar();
-    use_progress_bar = true;
   }
 
   int get_dm_trial_idx(void){
     pthread_mutex_lock(&mutex);
     int retval;
-    if (dm_idx==0)
-      if (use_progress_bar){
-	printf("Releasing DMs to workers...\n");
-	progress->start();
-      }
     if (dm_idx >= trials.get_count()){
       retval =  -1;
-      if (use_progress_bar)
-	progress->stop();
     } else {
-      if (use_progress_bar)
-	progress->set_progress((float)dm_idx/count);
       retval = dm_idx;
       dm_idx++;
+      if (prog) prog->tick_dm();
     }
     pthread_mutex_unlock(&mutex);
     return retval;
   }
 
   virtual ~DMDispenser(){
-    if (use_progress_bar)
-      delete progress;
     pthread_mutex_destroy(&mutex);
   }
 };
@@ -97,6 +81,7 @@ private:
   DMDispenser& manager;
   CmdLineOptions& args;
   AccelerationPlan& acc_plan;
+  ProgressMonitor* prog; // nullptr → no progress bar
   unsigned int size;
   int device;
   std::map<std::string,Stopwatch> timers;
@@ -231,6 +216,8 @@ void run_acceleration_search(int idx,
             d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
             sums, harm_folder, cand_finder, harm_finder, trial_cands,
             accel_search_cands, mean, std, size);
+        // Update progress bar
+        if (prog) prog->tick_bin(); 
     }
     POP_NVTX_RANGE
 }
@@ -380,7 +367,9 @@ void run_keplerian_search(int idx,
                     run_search_and_find_candidates(
                         d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
                         sums, harm_folder, cand_finder, harm_finder, trial_cands,
-                        keplerian_search_cands, mean, std, size);     
+                        keplerian_search_cands, mean, std, size); 
+                    // Update progress bar
+                    if (prog) prog->tick_bin();     
             }
         }
         else {
@@ -398,6 +387,8 @@ void run_keplerian_search(int idx,
                     d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
                     sums, harm_folder, cand_finder, harm_finder, trial_cands,
                     keplerian_search_cands, mean, std, size);
+                // Update progress bar
+                if (prog) prog->tick_bin(); 
             }
         }
 
@@ -417,6 +408,8 @@ void run_keplerian_search(int idx,
                     d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
                     sums, harm_folder, cand_finder, harm_finder, trial_cands,
                     keplerian_search_cands, mean, std, size);
+                // Update progress bar
+                if (prog) prog->tick_bin();
             }
         }
         else {
@@ -432,6 +425,8 @@ void run_keplerian_search(int idx,
                     d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
                     sums, harm_folder, cand_finder, harm_finder, trial_cands,
                     keplerian_search_cands, mean, std, size);
+                // Update progress bar
+                if (prog) prog->tick_bin();
             }
         }
     }
@@ -448,7 +443,7 @@ public:
 }
 
   Worker(DispersionTrials<DedispOutputType>& trials, DMDispenser& manager,
-	 AccelerationPlan& acc_plan, CmdLineOptions& args, unsigned int size, int device,
+	 AccelerationPlan& acc_plan, CmdLineOptions& args, unsigned int size, int device, ProgressMonitor* prog,
          std::optional<Keplerian_TemplateBank_Reader>& keplerian_tb, bool elliptical_orbit_search)
     :trials(trials)
     ,manager(manager)
@@ -456,6 +451,7 @@ public:
     ,args(args)
     ,size(size)
     ,device(device)
+    ,prog(prog)
     ,keplerian_tb(keplerian_tb)
     ,elliptical_orbit_search(elliptical_orbit_search)  
   {}
@@ -520,6 +516,7 @@ public:
         if (keplerian_tb) {
             
             if (args.verbose) std::cout << "Searching Keplerian templates for DM " << tim.get_dm() << "\n";
+            
 
             CandidateCollection keplerian_search_cands;
            
@@ -611,6 +608,7 @@ int main(int argc, char **argv)
   timers["total"].start();
 
   CmdLineOptions args;
+  ProgressMonitor* progPtr = nullptr;
   if (!read_cmdline_options(args,argc,argv))
     ErrorChecker::throw_error("Failed to parse command line arguments.");
 
@@ -628,11 +626,7 @@ int main(int argc, char **argv)
     std::cout << "-nosearch is only useful if you are only dumping timeseries. Otherwise it does nothing." << std::endl;
   }
 
-  //Stopwatch timer;
-  if (args.progress_bar)
-    printf("Reading header from %s\n",args.infilename.c_str());
-
-
+ 
   if (args.nsamples > 0 && args.size > 0 && args.nsamples > args.size) ErrorChecker::throw_error("nsamples cannot be > fft size.");
   if (args.size > 0 && args.nsamples == 0){
      args.nsamples =  args.size;
@@ -687,7 +681,6 @@ int main(int argc, char **argv)
         std::cout << "Using template bank file: " << args.keplerian_tb_file << std::endl;
 
     keplerian_tb.emplace(args.keplerian_tb_file);
-
     if (args.verbose) std::cout << "Loaded " << keplerian_tb->get_n().size()  << " templates\n";
 }
 
@@ -744,8 +737,6 @@ int main(int argc, char **argv)
     std::cout << "Executing dedispersion" << std::endl;
     }
 
-    if (args.progress_bar) std::cout <<"Starting dedispersion: " << start << " to " << end << "..." << std::endl;
-
     timers["dedispersion"].start();
     PUSH_NVTX_RANGE("Dedisperse",3)
     DispersionTrials<DedispOutputType> trials(filobj.get_tsamp());
@@ -765,9 +756,7 @@ int main(int argc, char **argv)
     POP_NVTX_RANGE
     //trials.set_nsamps(size);
     timers["dedispersion"].stop();
-    if (args.progress_bar)
-      printf("Complete (execution time %.2f s)\n",timers["dedispersion"].getTime());
-
+    
     std::cout <<"Starting searching..."  << std::endl;
 
     //Multithreading commands
@@ -776,9 +765,32 @@ int main(int argc, char **argv)
     std::vector<Worker*> workers(nthreads);
     std::vector<pthread_t> threads(nthreads);
 
-    DMDispenser dispenser(trials);
-    if (args.progress_bar)
-      dispenser.enable_progress_bar();
+    std::size_t total_bin_trials;
+    if (keplerian_tb) {
+        total_bin_trials = full_dm_list.size() * keplerian_tb->get_n().size();
+    } else {
+        // number of acceleration trials changes with each DM.
+        total_bin_trials = 0;
+        std::vector<float> acc_tmp;
+        for (float dm : full_dm_list) {
+            acc_tmp.clear();
+            acc_plan.generate_accel_list(dm, args.cdm, acc_tmp);
+            total_bin_trials += acc_tmp.size();
+        }
+    }
+   
+    // choose your time step for the progress bar
+    if (args.progress_bar) {
+        double dm_step  = 0.05;
+        double bin_step = 0.05;
+        auto   t_step   = std::chrono::seconds(3600); // 1 hour
+        progPtr = new ProgressMonitor(full_dm_list.size(),
+                                    total_bin_trials,
+                                    dm_step, bin_step, t_step);
+    }
+
+    DMDispenser dispenser(trials, progPtr);
+ 
 
     if (args.timeseries_dump_dir != ""){
       std::cout << "Dumping time series to " << args.timeseries_dump_dir << std::endl;
@@ -792,11 +804,9 @@ int main(int argc, char **argv)
         return 0;
       }
     }
-
-   
     
     for (int ii=0;ii<nthreads;ii++){
-      workers[ii] = (new Worker(trials,dispenser,acc_plan,args,size,ii,keplerian_tb,elliptical_orbit_search));
+      workers[ii] = (new Worker(trials,dispenser,acc_plan,args,size,ii,progPtr,keplerian_tb,elliptical_orbit_search));
       pthread_create(&threads[ii], NULL, launch_worker_thread, (void*) workers[ii]);
     }
 
@@ -808,11 +818,8 @@ int main(int argc, char **argv)
       dm_cands.append(workers[ii]->dm_trial_cands.cands);
       delete workers[ii];
     }
+    if (progPtr) progPtr->finish(); 
     timers["searching"].stop();
-
-    if (args.progress_bar)
-      printf("Complete (execution time %.2f s)\n",timers["searching"].getTime());
-
 
   }
 
@@ -865,6 +872,10 @@ int main(int argc, char **argv)
   xml_filepath << args.outdir << "/" << "overview.xml";
   stats.to_file(xml_filepath.str());
 
+  if (progPtr) {
+        delete progPtr;
+        progPtr = nullptr;
+    }
   std::cerr << "all done" << std::endl;
 
   return 0;
