@@ -220,36 +220,46 @@ public:
   }
 
   void add_candidates(std::vector<Candidate>& candidates, 
-		      std::map<unsigned,long int> byte_map)
-  {
+                    const std::map<unsigned, long int>& byte_map, 
+                    SigprocFilterbank& f)
+{
     XML::Element cands("candidates");
-    for (int ii=0;ii<candidates.size();ii++){
-      XML::Element cand("candidate");
-      double pb_days = (candidates[ii].n > 0) ? (2.0 * M_PI) / (candidates[ii].n * 86400.0) : 0;
-      cand.add_attribute("id",ii);
-      cand.append(XML::Element("period",1.0/candidates[ii].freq));
-      cand.append(XML::Element("opt_period",candidates[ii].opt_period));
-      cand.append(XML::Element("dm",candidates[ii].dm));
-      cand.append(XML::Element("acc",candidates[ii].acc));
-      cand.append(XML::Element("jerk",candidates[ii].jerk));
-      cand.append(XML::Element("pb",pb_days));
-      cand.append(XML::Element("a1",candidates[ii].a1));
-      cand.append(XML::Element("phi",candidates[ii].phi));
-      cand.append(XML::Element("omega",candidates[ii].omega));
-      cand.append(XML::Element("ecc",candidates[ii].ecc));
-      cand.append(XML::Element("nh",candidates[ii].nh));
-      cand.append(XML::Element("snr",candidates[ii].snr));
-      cand.append(XML::Element("folded_snr",candidates[ii].folded_snr));
-      cand.append(XML::Element("is_adjacent",candidates[ii].is_adjacent));
-      cand.append(XML::Element("is_physical",candidates[ii].is_physical));
-      cand.append(XML::Element("ddm_count_ratio",candidates[ii].ddm_count_ratio));
-      cand.append(XML::Element("ddm_snr_ratio",candidates[ii].ddm_snr_ratio));
-      cand.append(XML::Element("nassoc",candidates[ii].count_assoc()));
-      cand.append(XML::Element("byte_offset",byte_map[ii]));
-      cands.append(cand);
+
+    for (std::size_t ii = 0; ii < candidates.size(); ++ii) {
+        const Candidate& cand_ref = candidates[ii];
+
+        XML::Element cand("candidate");
+
+        double pb_days = (cand_ref.n > 0) ? (2.0 * M_PI) / (cand_ref.n * 86400.0) : 0.0;
+        double phi_normalised = (pb_days > 0.0) ? (cand_ref.phi / (2.0 * M_PI)) : 0.0;
+        double T0 = (pb_days > 0.0) ? f.get_segment_pepoch_template_bank() + phi_normalised * pb_days : 0.0;
+
+        cand.add_attribute("id", static_cast<int>(ii));
+        cand.append(XML::Element("period", 1.0 / cand_ref.freq));
+        cand.append(XML::Element("opt_period", cand_ref.opt_period));
+        cand.append(XML::Element("dm", cand_ref.dm));
+        cand.append(XML::Element("acc", cand_ref.acc));
+        cand.append(XML::Element("jerk", cand_ref.jerk));
+        cand.append(XML::Element("pb", pb_days));
+        cand.append(XML::Element("a1", cand_ref.a1));
+        cand.append(XML::Element("phi", cand_ref.phi));
+        cand.append(XML::Element("t0", T0));
+        cand.append(XML::Element("omega", cand_ref.omega));
+        cand.append(XML::Element("ecc", cand_ref.ecc));
+        cand.append(XML::Element("nh", cand_ref.nh));
+        cand.append(XML::Element("snr", cand_ref.snr));
+        cand.append(XML::Element("folded_snr", cand_ref.folded_snr));
+        cand.append(XML::Element("is_adjacent", cand_ref.is_adjacent));
+        cand.append(XML::Element("is_physical", cand_ref.is_physical));
+        cand.append(XML::Element("ddm_count_ratio", cand_ref.ddm_count_ratio));
+        cand.append(XML::Element("ddm_snr_ratio", cand_ref.ddm_snr_ratio));
+        cand.append(XML::Element("nassoc", candidates[ii].count_assoc()));
+        cands.append(cand);
     }
+
     root.append(cands);
-  }
+}
+
 
   void add_candidates(std::vector<Candidate>& candidates,
 		      std::map<int,std::string>& filenames){

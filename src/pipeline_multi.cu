@@ -864,7 +864,7 @@ int main(int argc, char **argv)
   for (int device_idx=0;device_idx<nthreads;device_idx++)
     device_idxs.push_back(device_idx);
   stats.add_gpu_info(device_idxs);
-  stats.add_candidates(dm_cands.cands,cand_files.byte_mapping);
+  stats.add_candidates(dm_cands.cands,cand_files.byte_mapping,filobj);
   timers["total"].stop();
   stats.add_timing_info(timers);
 
@@ -876,7 +876,13 @@ int main(int argc, char **argv)
         delete progPtr;
         progPtr = nullptr;
     }
-  std::cerr << "all done" << std::endl;
+  //Print time for dedispersion, searching and total
+  if (args.progress_bar) {
+        std::cout << "Dedispersion took " << timers["dedispersion"].getTime() << " seconds" << std::endl;
+        std::cout << "Searching took " << timers["searching"].getTime() << " seconds" << std::endl;
+        std::cout << "Total time taken: " << timers["total"].getTime() << " seconds" << std::endl;
+    }
+  std::cout << "all done" << std::endl;
 
   return 0;
 }
