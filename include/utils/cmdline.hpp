@@ -219,7 +219,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       TCLAP::SwitchArg arg_exact_resampler("", "exact_resampler", "Run exact resampler using linear interpolation", cmd);
 
 
-      TCLAP::ValueArg<std::string> arg_keplerian_template_bank_filename("K", "keplerian_templates",
+      TCLAP::ValueArg<std::string> arg_keplerian_template_bank_filename("K", "keplerian_template_bank_file",
                                                                          "filename of keplerian template bank",
                                                                          false, "none", "string", cmd);
       
