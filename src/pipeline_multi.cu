@@ -638,7 +638,7 @@ int main(int argc, char **argv)
   timers["reading"].stop();
 
   if (args.progress_bar){
-    printf("Complete (execution time %.2f s)\n",timers["reading"].getTime());
+    printf("Filterbank Reading Complete\n");
   }
   unsigned int size;
   if (args.size == 0){
@@ -653,7 +653,6 @@ int main(int argc, char **argv)
 
   if (args.verbose)
     std::cout << "Effective nsamples " << filobj.get_effective_nsamps() << " points" << std::endl;
-    std::cout << "Setting transform length to " << size << " points" << std::endl;
 
 
   DMDistiller dm_still(args.freq_tol,true);
@@ -757,6 +756,7 @@ int main(int argc, char **argv)
     //trials.set_nsamps(size);
     timers["dedispersion"].stop();
     
+    std::cout << "Setting FFT length to " << size << " points" << std::endl;
     std::cout <<"Starting searching..."  << std::endl;
 
     //Multithreading commands

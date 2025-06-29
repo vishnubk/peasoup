@@ -307,10 +307,10 @@ public:
    */
   std::size_t load_gulp(std::size_t gulp_start_sample, std::size_t gulp_nsamples)
   {
-    std::cout << "Loading filterbank gulp,"
-              << " start = " << gulp_start_sample
-              << " nsamples = " << gulp_nsamples
-              << std::endl;
+    // std::cout << "Loading filterbank gulp,"
+    //           << " start = " << gulp_start_sample
+    //           << " nsamples = " << gulp_nsamples
+    //           << std::endl;
     std::size_t size = static_cast<std::size_t>(gulp_nsamples * _header.nbits * _header.nchans / 8);
     _data.resize(size);
     std::size_t byte_offset = gulp_start_sample * _header.nbits * _header.nchans / 8;
@@ -322,7 +322,7 @@ public:
     _data.resize(bytes_read);
     set_data(_data.data());
     std::size_t nsamps_read = bytes_read / ( _header.nbits * _header.nchans / 8);
-    std::cout << "Loaded " << nsamps_read << " samples" << std::endl;
+    //std::cout << "Loaded " << nsamps_read << " samples" << std::endl;
     return nsamps_read;
   }
 
