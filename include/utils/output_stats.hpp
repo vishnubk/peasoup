@@ -224,15 +224,19 @@ public:
                     SigprocFilterbank& f)
 {
     XML::Element cands("candidates");
+    constexpr double RAD2DEG = 180.0 / M_PI;
+    constexpr double TWO_PI = 2 * M_PI;
 
     for (std::size_t ii = 0; ii < candidates.size(); ++ii) {
         const Candidate& cand_ref = candidates[ii];
 
         XML::Element cand("candidate");
 
-        double pb_days = (cand_ref.n > 0) ? (2.0 * M_PI) / (cand_ref.n * 86400.0) : 0.0;
-        double phi_normalised = (pb_days > 0.0) ? (cand_ref.phi / (2.0 * M_PI)) : 0.0;
+        double pb_days = (cand_ref.n > 0) ? TWO_PI / (cand_ref.n * 86400.0) : 0.0;
+        double phi_normalised = (cand_ref.phi > 0.0) ? (cand_ref.phi / TWO_PI) : 0.0;
         double T0 = (pb_days > 0.0) ? f.get_segment_pepoch_template_bank() + phi_normalised * pb_days : 0.0;
+        double phi_deg = (cand_ref.phi > 0.0) ? (cand_ref.phi * RAD2DEG) : 0.0;
+        double omega_deg = (cand_ref.omega > 0.0) ? (cand_ref.omega * RAD2DEG) : 0.0;
 
         cand.add_attribute("id", static_cast<int>(ii));
         cand.append(XML::Element("period", 1.0 / cand_ref.freq));
@@ -242,9 +246,9 @@ public:
         cand.append(XML::Element("jerk", cand_ref.jerk));
         cand.append(XML::Element("pb", pb_days));
         cand.append(XML::Element("a1", cand_ref.a1));
-        cand.append(XML::Element("phi", cand_ref.phi));
+        cand.append(XML::Element("phi", phi_deg));
         cand.append(XML::Element("t0", T0));
-        cand.append(XML::Element("omega", cand_ref.omega));
+        cand.append(XML::Element("omega", omega_deg));
         cand.append(XML::Element("ecc", cand_ref.ecc));
         cand.append(XML::Element("nh", cand_ref.nh));
         cand.append(XML::Element("snr", cand_ref.snr));

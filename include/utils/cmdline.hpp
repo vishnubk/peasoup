@@ -235,7 +235,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       args.dm_file           = arg_dm_file.getValue();
       args.cdm               = arg_cdm.getValue();
       args.dm_end            = arg_dm_end.getValue();
-      args.dm_start            = arg_dm_start.getValue();
+      args.dm_start          = arg_dm_start.getValue();
       args.dm_tol            = arg_dm_tol.getValue();
       args.dm_pulse_width    = arg_dm_pulse_width.getValue();
       args.host_ram_limit_gb = arg_host_ram_limit_gb.getValue();
