@@ -83,7 +83,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
 {
   try
     {
-      TCLAP::CmdLine cmd("Cocktail Soup - a GPU pulsar search pipeline that performs Polynomial and Keplerian parameter searches", ' ', "1.0");
+      TCLAP::CmdLine cmd("Peasoup - a GPU pulsar search pipeline that performs Polynomial and Keplerian parameter searches", ' ', "2.0");
 
       TCLAP::ValueArg<std::string> arg_infilename("i", "inputfile",
 						  "File to process (.fil)",
