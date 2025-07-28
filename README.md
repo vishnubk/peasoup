@@ -272,6 +272,6 @@ These numbers are useful baselines when estimating total search runtime. Actual 
 
 ## Acknowledgements
 
-Peasoup was developed by [Ewan Barr](https://github.com/ewanbarr) with contributions from Vishnu, Vivek, Prajwal, Yunpeng, and Jiri. It has been used to discover over 200 pulsars. If you use Peasoup in your research, please cite this repository.
+Peasoup was developed by Ewan Barr with contributions from Vishnu, Vivek, Prajwal, Yunpeng, and Jiri. It has been used to discover over 200 pulsars. If you use Peasoup in your research, please cite this repository.
 
 
