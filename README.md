@@ -26,7 +26,7 @@
 
 ## New Features in the Latest Version
 
-* **Full Keplerian Orbit Searches**: Support for circular (3-parameter) and elliptical (5-parameter) Keplerian orbital binary searches using a template bank.
+* **Template Bank Searches**: `Peasoup` now supports going beyond acceleration and jerk searches to perform coherent Keplerian binary parameter searches using a template bank. Circular orbit templates use three parameters: orbital angular frequency (ω), projected semi-major axis (τ), and orbital phase (ϕ). Elliptical templates add eccentricity (e) and longitude of periastron (ωₚ), enabling detection of short-period compact orbit binaries.
 
 * **CUDA 12.6 Compatibility**: Now builds and runs with CUDA versions up to 12.6. Previous issues with legacy texture memory in `dedisp` are fixed.
 
@@ -38,15 +38,14 @@
 
   **What’s the difference?**
 
-  * `--fft_size`: Total number of samples to use for FFT. Peasoup pads with zeros if the segment is shorter.
-  * `--nsamples`: Upper bound on how many real samples to read before padding.
+  * `--fft_size`: Total number of samples to use for FFT. 
+  * `--nsamples`: Upper bound on how many real samples.
 
   Recommended usage: use `--start_sample` and `--fft_size`. Use `--nsamples` only when you're intentionally truncating the read segment.
 
   Example scenarios:
-
-  * `--start_sample=0.25*total`, `--fft_size=0.5*total`: analyzes the central 50% of the filterbank.
-  * `--start_sample=0.25*total`, `--nsamples=0.25*total`, `--fft_size=0.5*total`: reads only 25% of the file, pads 25% of zeros.
+  * `--start_sample=0.25*total`,  `--fft_size=0.5*total`: Peasoup reads `25%` to `75%` of the filterbank time samples.
+  * `--start_sample=0.25*total`, `--nsamples=0.25*total`, `--fft_size=0.5*total`: Peasoup reads only `25%` to `50%` of the filterbank samples, and pads an additional `0.25*total` of zeros before searching.
 
 * **Coherent DM Correction (`--cdm`)**: If your filterbank file has been coherently dedispersed to a non-zero DM, you can now inform Peasoup using the `--cdm` flag. This modifies the acceleration plan, making the search step size finer near the coherent DM value and improving sensitivity.
 
@@ -108,7 +107,8 @@ peasoup -i data.fil \
         --acc_end 50.0 \
         --dm_file my_dm_trials.txt \
         --ram_limit_gb 180.0 \
-        -n 4
+        -n 4 \
+        -p 
 ```
 
 > ⚠️ Always specify `--fft_size`. Peasoup defaults to the next lowest power-of-two if it's missing. While `cuFFT` supports efficient FFTs for sizes composed of 2, 3, 5, or 7 as prime factors, performance can vary across GPUs. For large-scale surveys, we recommend benchmarking different FFT sizes and explicitly setting `--fft_size` to avoid issues from observations that fall slightly short of the next optimal size.
@@ -128,7 +128,7 @@ peasoup -i data.fil \
         --acc_end 100.0 \
         --dm_file dm_trials.txt \
         --cdm 33.0 \
-        -n 4 -t 1 -o output_dir
+        -n 4 -t 1 -p -o output_dir
 ```
 
 ---
@@ -213,7 +213,7 @@ peasoup -i data.fil \
         -K circular_orbit_template_bank.txt \
         --dm_file dm_trials.txt \
         --cdm 33.0 \
-        -n 4 -t 1 -o output_dir
+        -n 4 -t 1 -p -o output_dir
 ```
 
 ### Segmented template bank Searches
