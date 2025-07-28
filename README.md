@@ -49,7 +49,8 @@
 
 * **Coherent DM Correction (`--cdm`)**: If your filterbank file has been coherently dedispersed to a non-zero DM, you can now inform Peasoup using the `--cdm` flag. This modifies the acceleration plan, making the search step size finer near the coherent DM value and improving sensitivity.
 
-* **Single Precision Harmonic Sums**: Enabled via `--single_precision_harmonic_sums`. Reduces GPU memory and speeds up harmonic summing.
+* **Single Precision Harmonic Sums**: Enabled via 
+`--single_precision_harmonic_sums`. Reduces GPU memory and speeds up harmonic summing.
 
 * **Presto-Compatible Dedispersed Time Series**: Run Peasoup in "dedispersion-only" mode with `-d` and `--nosearch`. This dumps `.dat` files compatible with PRESTO. No barycentric correction is applied. Equivalent to PRESTO’s `prepdata -nobary -dm $dm $input_file`.
 
@@ -137,7 +138,7 @@ peasoup -i data.fil \
 
 #### Using PulsarX
 
-Use the `segment_pepoch` from Peasoup’s XML output as the reference epoch.
+Use the `segment_pepoch` from Peasoup’s XML output (example [here](https://github.com/vishnubk/peasoup/blob/master/examples/sample_output/acceleration_search.xml)) as the reference epoch.
 
 ```bash
 psrfold_fil -v -t 12 --candfile pulsarx.candfile \
