@@ -154,7 +154,7 @@ Example `pulsarx.candfile`:
 1 46.750000 548.444214 162.808395 0 0 8.425230
 ```
 
-Bonus: Use `psrfold_fil2` for faster dedispersion+folding of hundreds of candidates.
+Bonus Tip: Use `psrfold_fil2` for faster dedispersion+folding of hundreds of candidates.
 
 #### Using prepfold (PRESTO)
 
