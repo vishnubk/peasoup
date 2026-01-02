@@ -13,6 +13,7 @@
 #include <transforms/peakfinder.hpp>
 #include <transforms/distiller.hpp>
 #include <transforms/harmonicfolder.hpp>
+#include <transforms/coherentharmonicfolder.hpp>
 #include <transforms/scorer.hpp>
 #include <transforms/template_bank_reader.hpp>
 #include <utils/exceptions.hpp>
@@ -150,6 +151,7 @@ void run_search_and_find_candidates(DeviceTimeSeries<float>& d_tim_resampled,
     SpectrumFormer& former,
     HarmonicSums<float>& sums,
     HarmonicFolder& harm_folder,
+    CoherentHarmonicFolder* coherent_harm_folder,
     PeakFinder& cand_finder,
     HarmonicDistiller& harm_finder,
     SpectrumCandidates& trial_cands,
@@ -162,8 +164,17 @@ void run_search_and_find_candidates(DeviceTimeSeries<float>& d_tim_resampled,
     former.form_interpolated(d_fseries, d_pspec);
     if (args.verbose) std::cout << "Normalising power spectrum\n";
     stats::normalise(d_pspec.get_data(), mean * size, std * size, size / 2 + 1);
-    if (args.verbose) std::cout << "Harmonic summing\n";
-    harm_folder.fold(d_pspec);
+
+    if (coherent_harm_folder != nullptr) {
+        // Coherent harmonic summing: use complex Fourier series directly
+        if (args.verbose) std::cout << "Coherent harmonic summing\n";
+        coherent_harm_folder->fold(d_fseries, d_pspec);
+    } else {
+        // Incoherent harmonic summing: use power spectrum
+        if (args.verbose) std::cout << "Harmonic summing\n";
+        harm_folder.fold(d_pspec);
+    }
+
     if (args.verbose) std::cout << "Finding peaks\n";
     cand_finder.find_candidates(d_pspec, trial_cands);
     cand_finder.find_candidates(sums, trial_cands);
@@ -196,6 +207,7 @@ void run_acceleration_search(int idx,
     SpectrumFormer& former,
     HarmonicSums<float>& sums,
     HarmonicFolder& harm_folder,
+    CoherentHarmonicFolder* coherent_harm_folder,
     PeakFinder& cand_finder,
     HarmonicDistiller& harm_finder,
     float mean, float std, unsigned int size
@@ -204,7 +216,7 @@ void run_acceleration_search(int idx,
     if (args.verbose) std::cout << "Generating acceleration list\n";
     acc_plan.generate_accel_list(tim.get_dm(), args.cdm, acc_list);
     if (args.verbose) std::cout << "Searching " << acc_list.size() << " acceleration trials for DM " << tim.get_dm() << "\n";
-    
+
     PUSH_NVTX_RANGE("Acceleration-Loop",1)
 
     for (int jj = 0; jj < acc_list.size(); jj++) {
@@ -214,10 +226,10 @@ void run_acceleration_search(int idx,
         SpectrumCandidates trial_cands(tim.get_dm(), idx, accel_search);
         run_search_and_find_candidates(
             d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-            sums, harm_folder, cand_finder, harm_finder, trial_cands,
+            sums, harm_folder, coherent_harm_folder, cand_finder, harm_finder, trial_cands,
             accel_search_cands, mean, std, size);
         // Update progress bar
-        if (prog) prog->tick_bin(); 
+        if (prog) prog->tick_bin();
     }
     POP_NVTX_RANGE
 }
@@ -339,6 +351,7 @@ void run_keplerian_search(int idx,
     SpectrumFormer& former,
     HarmonicSums<float>& sums,
     HarmonicFolder& harm_folder,
+    CoherentHarmonicFolder* coherent_harm_folder,
     PeakFinder& cand_finder,
     HarmonicDistiller& harm_finder,
     float mean, float std, unsigned int size,
@@ -366,10 +379,10 @@ void run_keplerian_search(int idx,
                     SpectrumCandidates trial_cands(tim.get_dm(), idx, elliptical_orbit_search);
                     run_search_and_find_candidates(
                         d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-                        sums, harm_folder, cand_finder, harm_finder, trial_cands,
-                        keplerian_search_cands, mean, std, size); 
+                        sums, harm_folder, coherent_harm_folder, cand_finder, harm_finder, trial_cands,
+                        keplerian_search_cands, mean, std, size);
                     // Update progress bar
-                    if (prog) prog->tick_bin();     
+                    if (prog) prog->tick_bin();
             }
         }
         else {
@@ -385,10 +398,10 @@ void run_keplerian_search(int idx,
                 SpectrumCandidates trial_cands(tim.get_dm(), idx, elliptical_orbit_search);
                 run_search_and_find_candidates(
                     d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-                    sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                    sums, harm_folder, coherent_harm_folder, cand_finder, harm_finder, trial_cands,
                     keplerian_search_cands, mean, std, size);
                 // Update progress bar
-                if (prog) prog->tick_bin(); 
+                if (prog) prog->tick_bin();
             }
         }
 
@@ -406,7 +419,7 @@ void run_keplerian_search(int idx,
                 SpectrumCandidates trial_cands(tim.get_dm(), idx, circular_orbit_search);
                 run_search_and_find_candidates(
                     d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-                    sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                    sums, harm_folder, coherent_harm_folder, cand_finder, harm_finder, trial_cands,
                     keplerian_search_cands, mean, std, size);
                 // Update progress bar
                 if (prog) prog->tick_bin();
@@ -423,7 +436,7 @@ void run_keplerian_search(int idx,
                 SpectrumCandidates trial_cands(tim.get_dm(), idx, circular_orbit_search);
                 run_search_and_find_candidates(
                     d_tim_resampled, r2cfft, c2rfft, d_fseries, d_pspec, former,
-                    sums, harm_folder, cand_finder, harm_finder, trial_cands,
+                    sums, harm_folder, coherent_harm_folder, cand_finder, harm_finder, trial_cands,
                     keplerian_search_cands, mean, std, size);
                 // Update progress bar
                 if (prog) prog->tick_bin();
@@ -483,9 +496,14 @@ public:
     float mean,std,rms;
     int idx;
 
-    if(args.single_precision_harmonic_sums){
+    // Set up coherent harmonic folder if requested
+    CoherentHarmonicFolder* coherent_harm_folder = nullptr;
+    if (args.coherent_harmonic_sums) {
+        coherent_harm_folder = new CoherentHarmonicFolder(sums);
+        if (args.verbose) std::cout << "Using coherent harmonic sums (optimal for any duty cycle)\n";
+    } else if (args.single_precision_harmonic_sums) {
         if (args.verbose) std::cout << "Using single precision harmonic sums\n";
-    }else {
+    } else {
         if (args.verbose) std::cout << "Using double precision harmonic sums\n";
     }
     
@@ -523,7 +541,7 @@ public:
             run_keplerian_search(
                 idx, *keplerian_tb, keplerian_search_cands, tim, d_tim, d_tim_resampled,
                 r2cfft, c2rfft, d_fseries, d_pspec, former, sums, harm_folder,
-                cand_finder, harm_finder, mean, std, size, tsamp, inverse_tsamp);
+                coherent_harm_folder, cand_finder, harm_finder, mean, std, size, tsamp, inverse_tsamp);
             
             if (args.distill_circular_orbit_cands) {
                 if (args.verbose) std::cout << "Distilling circular orbit candidates\n";
@@ -542,7 +560,7 @@ public:
             // Acceleration search only
             run_acceleration_search(
                 idx, acc_plan, accel_search_cands, acc_list, tim, d_tim, d_tim_resampled, r2cfft, c2rfft,
-                d_fseries, d_pspec, former, sums, harm_folder, cand_finder,
+                d_fseries, d_pspec, former, sums, harm_folder, coherent_harm_folder, cand_finder,
                 harm_finder, mean, std, size);
 
             if (args.verbose) std::cout << "Distilling accelerations" << std::endl;
@@ -553,6 +571,9 @@ public:
 
     if (args.zapfilename!="")
       delete bzap;
+
+    if (coherent_harm_folder != nullptr)
+      delete coherent_harm_folder;
 
     if (args.verbose)
       std::cout << "DM processing took " << pass_timer.getTime() << " seconds"<< std::endl;

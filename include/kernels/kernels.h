@@ -101,13 +101,21 @@ typedef struct {
   unsigned phasebin;
 } peasoup_fold_plan;
 
-void device_harmonic_sum(float* d_input_array, 
+void device_harmonic_sum(float* d_input_array,
 			 float** d_output_array,
-			 size_t size, 
+			 size_t size,
 			 unsigned nharms,
              bool single_precision,
 			 unsigned int max_blocks,
 			 unsigned int max_threads);
+
+void device_coherent_harmonic_sum(cufftComplex* d_fseries,
+                                   float** d_output_array,
+                                   size_t size,
+                                   size_t fseries_size,
+                                   unsigned nharms,
+                                   unsigned int max_blocks,
+                                   unsigned int max_threads);
 
 void device_form_power_series(cufftComplex* d_array_in,
 			      float* d_array_out,

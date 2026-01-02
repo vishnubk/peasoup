@@ -27,6 +27,7 @@
 #include <map>
 
 #define SQRT2 1.4142135623730951f
+#define PI 3.14159265358979323846f
 
 //--------------Harmonic summing----------------//
 
@@ -281,6 +282,321 @@ void device_harmonic_sum(float* d_input_array, float** d_output_array,
     harmonic_sum_kernel<<<blocks,max_threads>>>(d_input_array,d_output_array,size,nharms);
     }
   ErrorChecker::check_cuda_error("Error from device_harmonic_sum");
+}
+
+//--------------Coherent Harmonic Summing----------------//
+/*
+ * Coherent harmonic summing preserves phase information for optimal sensitivity
+ * at any duty cycle. For each candidate fundamental frequency, we:
+ * 1. Gather complex Fourier coefficients at harmonic frequencies
+ * 2. Search over initial phase to find optimal coherent sum
+ * 3. Use FFT-based phase search for efficiency
+ *
+ * The coherent sum as a function of phase φ is:
+ *   S(φ) = |Σ_k F(k*f0) * exp(-i*k*φ)|
+ *
+ * This is computed efficiently via FFT of the harmonic sequence.
+ */
+
+// Inline complex operations for kernel use
+__device__ __forceinline__ float2 complex_mul(float2 a, float2 b) {
+    return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+__device__ __forceinline__ float2 complex_add(float2 a, float2 b) {
+    return make_float2(a.x + b.x, a.y + b.y);
+}
+
+__device__ __forceinline__ float complex_mag_sq(float2 a) {
+    return a.x * a.x + a.y * a.y;
+}
+
+// Twiddle factor: exp(-2*pi*i*k/N)
+__device__ __forceinline__ float2 twiddle(int k, int N) {
+    float angle = -2.0f * PI * k / N;
+    return make_float2(cosf(angle), sinf(angle));
+}
+
+// In-place radix-2 DIT FFT for small fixed sizes (up to 32 points)
+// Input/output in registers for maximum performance
+__device__ void fft32_inplace(float2* data) {
+    // Bit-reversal permutation for N=32
+    const int bitrev32[32] = {
+        0, 16, 8, 24, 4, 20, 12, 28, 2, 18, 10, 26, 6, 22, 14, 30,
+        1, 17, 9, 25, 5, 21, 13, 29, 3, 19, 11, 27, 7, 23, 15, 31
+    };
+
+    float2 temp[32];
+    for (int i = 0; i < 32; i++) {
+        temp[i] = data[bitrev32[i]];
+    }
+    for (int i = 0; i < 32; i++) {
+        data[i] = temp[i];
+    }
+
+    // Cooley-Tukey DIT FFT
+    for (int s = 1; s <= 5; s++) {  // log2(32) = 5 stages
+        int m = 1 << s;
+        int m2 = m >> 1;
+        for (int k = 0; k < 32; k += m) {
+            for (int j = 0; j < m2; j++) {
+                float2 w = twiddle(j, m);
+                float2 t = complex_mul(w, data[k + j + m2]);
+                float2 u = data[k + j];
+                data[k + j] = complex_add(u, t);
+                data[k + j + m2] = make_float2(u.x - t.x, u.y - t.y);
+            }
+        }
+    }
+}
+
+// FFT for N=16
+__device__ void fft16_inplace(float2* data) {
+    const int bitrev16[16] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
+
+    float2 temp[16];
+    for (int i = 0; i < 16; i++) {
+        temp[i] = data[bitrev16[i]];
+    }
+    for (int i = 0; i < 16; i++) {
+        data[i] = temp[i];
+    }
+
+    for (int s = 1; s <= 4; s++) {
+        int m = 1 << s;
+        int m2 = m >> 1;
+        for (int k = 0; k < 16; k += m) {
+            for (int j = 0; j < m2; j++) {
+                float2 w = twiddle(j, m);
+                float2 t = complex_mul(w, data[k + j + m2]);
+                float2 u = data[k + j];
+                data[k + j] = complex_add(u, t);
+                data[k + j + m2] = make_float2(u.x - t.x, u.y - t.y);
+            }
+        }
+    }
+}
+
+// FFT for N=8
+__device__ void fft8_inplace(float2* data) {
+    const int bitrev8[8] = {0, 4, 2, 6, 1, 5, 3, 7};
+
+    float2 temp[8];
+    for (int i = 0; i < 8; i++) {
+        temp[i] = data[bitrev8[i]];
+    }
+    for (int i = 0; i < 8; i++) {
+        data[i] = temp[i];
+    }
+
+    for (int s = 1; s <= 3; s++) {
+        int m = 1 << s;
+        int m2 = m >> 1;
+        for (int k = 0; k < 8; k += m) {
+            for (int j = 0; j < m2; j++) {
+                float2 w = twiddle(j, m);
+                float2 t = complex_mul(w, data[k + j + m2]);
+                float2 u = data[k + j];
+                data[k + j] = complex_add(u, t);
+                data[k + j + m2] = make_float2(u.x - t.x, u.y - t.y);
+            }
+        }
+    }
+}
+
+// FFT for N=4
+__device__ void fft4_inplace(float2* data) {
+    // Stage 1
+    float2 t0 = complex_add(data[0], data[2]);
+    float2 t1 = make_float2(data[0].x - data[2].x, data[0].y - data[2].y);
+    float2 t2 = complex_add(data[1], data[3]);
+    float2 t3 = make_float2(data[1].x - data[3].x, data[1].y - data[3].y);
+
+    // Multiply t3 by -i (twiddle for k=1, N=4)
+    t3 = make_float2(t3.y, -t3.x);
+
+    // Stage 2
+    data[0] = complex_add(t0, t2);
+    data[1] = complex_add(t1, t3);
+    data[2] = make_float2(t0.x - t2.x, t0.y - t2.y);
+    data[3] = make_float2(t1.x - t3.x, t1.y - t3.y);
+}
+
+// FFT for N=2
+__device__ void fft2_inplace(float2* data) {
+    float2 t0 = complex_add(data[0], data[1]);
+    float2 t1 = make_float2(data[0].x - data[1].x, data[0].y - data[1].y);
+    data[0] = t0;
+    data[1] = t1;
+}
+
+/*
+ * Coherent harmonic sum kernel
+ *
+ * For each frequency bin idx (candidate fundamental), gather harmonics
+ * from the complex Fourier series and compute the optimal coherent sum
+ * by searching over initial phase using FFT.
+ *
+ * Input: d_fseries - complex Fourier series (cufftComplex*)
+ * Output: d_odata[0..4] - coherent sums for 2, 4, 8, 16, 32 harmonics
+ */
+__global__
+void coherent_harmonic_sum_kernel(cufftComplex *d_fseries, float **d_odata,
+                                   size_t size, size_t fseries_size, unsigned nharms)
+{
+    for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
+         idx += blockDim.x * gridDim.x)
+    {
+        // Harmonic arrays - we'll reuse these for each fold level
+        float2 H[32];
+
+        // Initialize to zero
+        for (int k = 0; k < 32; k++) {
+            H[k] = make_float2(0.0f, 0.0f);
+        }
+
+        // Gather harmonics: H[k] = F[(k+1) * idx] for k = 0, 1, ..., nharm-1
+        // Note: k+1 because we want harmonics 1, 2, 3, ... not 0, 1, 2, ...
+        // Also include the fundamental (k=0 corresponds to harmonic 1)
+
+        // For 2-harmonic sum (nharms > 0)
+        if (nharms > 0) {
+            float2 H2[2];
+            for (int k = 0; k < 2; k++) {
+                int harm_idx = (k + 1) * idx;
+                if (harm_idx < fseries_size) {
+                    cufftComplex c = d_fseries[harm_idx];
+                    H2[k] = make_float2(c.x, c.y);
+                } else {
+                    H2[k] = make_float2(0.0f, 0.0f);
+                }
+            }
+
+            // 2-point FFT to search over 2 phase values
+            fft2_inplace(H2);
+
+            // Find max magnitude
+            float max_mag_sq = 0.0f;
+            for (int j = 0; j < 2; j++) {
+                float mag_sq = complex_mag_sq(H2[j]);
+                if (mag_sq > max_mag_sq) max_mag_sq = mag_sq;
+            }
+
+            // Normalize: divide by sqrt(nharm) to maintain SNR statistics
+            // Output is sqrt(power) to match incoherent convention
+            d_odata[0][idx] = sqrtf(max_mag_sq) * rsqrtf(2.0f);
+        }
+
+        // For 4-harmonic sum (nharms > 1)
+        if (nharms > 1) {
+            float2 H4[4];
+            for (int k = 0; k < 4; k++) {
+                int harm_idx = (k + 1) * idx;
+                if (harm_idx < fseries_size) {
+                    cufftComplex c = d_fseries[harm_idx];
+                    H4[k] = make_float2(c.x, c.y);
+                } else {
+                    H4[k] = make_float2(0.0f, 0.0f);
+                }
+            }
+
+            fft4_inplace(H4);
+
+            float max_mag_sq = 0.0f;
+            for (int j = 0; j < 4; j++) {
+                float mag_sq = complex_mag_sq(H4[j]);
+                if (mag_sq > max_mag_sq) max_mag_sq = mag_sq;
+            }
+
+            d_odata[1][idx] = sqrtf(max_mag_sq) * 0.5f;
+        }
+
+        // For 8-harmonic sum (nharms > 2)
+        if (nharms > 2) {
+            float2 H8[8];
+            for (int k = 0; k < 8; k++) {
+                int harm_idx = (k + 1) * idx;
+                if (harm_idx < fseries_size) {
+                    cufftComplex c = d_fseries[harm_idx];
+                    H8[k] = make_float2(c.x, c.y);
+                } else {
+                    H8[k] = make_float2(0.0f, 0.0f);
+                }
+            }
+
+            fft8_inplace(H8);
+
+            float max_mag_sq = 0.0f;
+            for (int j = 0; j < 8; j++) {
+                float mag_sq = complex_mag_sq(H8[j]);
+                if (mag_sq > max_mag_sq) max_mag_sq = mag_sq;
+            }
+
+            d_odata[2][idx] = sqrtf(max_mag_sq) * rsqrtf(8.0f);
+        }
+
+        // For 16-harmonic sum (nharms > 3)
+        if (nharms > 3) {
+            float2 H16[16];
+            for (int k = 0; k < 16; k++) {
+                int harm_idx = (k + 1) * idx;
+                if (harm_idx < fseries_size) {
+                    cufftComplex c = d_fseries[harm_idx];
+                    H16[k] = make_float2(c.x, c.y);
+                } else {
+                    H16[k] = make_float2(0.0f, 0.0f);
+                }
+            }
+
+            fft16_inplace(H16);
+
+            float max_mag_sq = 0.0f;
+            for (int j = 0; j < 16; j++) {
+                float mag_sq = complex_mag_sq(H16[j]);
+                if (mag_sq > max_mag_sq) max_mag_sq = mag_sq;
+            }
+
+            d_odata[3][idx] = sqrtf(max_mag_sq) * 0.25f;
+        }
+
+        // For 32-harmonic sum (nharms > 4)
+        if (nharms > 4) {
+            float2 H32[32];
+            for (int k = 0; k < 32; k++) {
+                int harm_idx = (k + 1) * idx;
+                if (harm_idx < fseries_size) {
+                    cufftComplex c = d_fseries[harm_idx];
+                    H32[k] = make_float2(c.x, c.y);
+                } else {
+                    H32[k] = make_float2(0.0f, 0.0f);
+                }
+            }
+
+            fft32_inplace(H32);
+
+            float max_mag_sq = 0.0f;
+            for (int j = 0; j < 32; j++) {
+                float mag_sq = complex_mag_sq(H32[j]);
+                if (mag_sq > max_mag_sq) max_mag_sq = mag_sq;
+            }
+
+            d_odata[4][idx] = sqrtf(max_mag_sq) * rsqrtf(32.0f);
+        }
+    }
+}
+
+void device_coherent_harmonic_sum(cufftComplex* d_fseries, float** d_output_array,
+                                   size_t size, size_t fseries_size, unsigned nharms,
+                                   unsigned int max_blocks, unsigned int max_threads)
+{
+    unsigned blocks = size / max_threads + 1;
+    if (blocks > max_blocks)
+        blocks = max_blocks;
+
+    coherent_harmonic_sum_kernel<<<blocks, max_threads>>>(
+        d_fseries, d_output_array, size, fseries_size, nharms);
+
+    ErrorChecker::check_cuda_error("Error from device_coherent_harmonic_sum");
 }
 
 //------------spectrum forming--------------//
