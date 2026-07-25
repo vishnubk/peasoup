@@ -710,12 +710,12 @@ double zero_offset = 0.0;
 
 //---Interpolator resampler---------------------//
 
-__device__ double get_roemer_delay_bt_model_elliptical(unsigned long idx, double n, double a1, 
-    double phi, double omega, double ecc, double tsamp)
+//Evaluates the BT-model roemer delay R(t) at a single time t
+__device__ double evaluate_roemer_delay_bt_model_elliptical(double t, double n, double a1,
+    double phi, double omega, double ecc)
 
 {
 
-double t = idx * tsamp;
 double mean_anomaly = n * t - phi;
 double eccentric_anomaly = mean_anomaly + ecc * sin(mean_anomaly) * (1. + ecc * cos(mean_anomaly));
 
@@ -731,6 +731,23 @@ while(abs(du) > 1.0e-13)
 double roemer_delay = a1  * ((cos(eccentric_anomaly) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly) * cos(omega));
 
 return roemer_delay;
+}
+
+__device__ double get_roemer_delay_bt_model_elliptical(unsigned long idx, double n, double a1,
+    double phi, double omega, double ecc, double tsamp)
+
+{
+
+double t = idx * tsamp;
+/* Same emission-time inversion as the circular case, evaluating the
+   full BT-model delay at each iteration. */
+double tau = t;
+for (int iteration = 0; iteration < 5; iteration++)
+{
+    tau = t - evaluate_roemer_delay_bt_model_elliptical(tau, n, a1, phi, omega, ecc);
+}
+
+return t - tau;
 }
 
 __global__ void subtract_roemer_delay_bt_model_elliptical_kernel(double* d_t_binary_grid_ptr, double* d_t_telescope_nonuniform_ptr,
@@ -770,10 +787,18 @@ __device__ double get_roemer_delay_circular(unsigned long idx,
 {
 
 double t = idx * tsamp;
-double mean_anomaly = n * t - phi;
-double sine_mean_anomaly = sin(mean_anomaly);
-double roemer_delay = a1 * sine_mean_anomaly;
-return roemer_delay;
+/* A pulse emitted at tau arrives at t = tau + R(tau). Evaluating the
+   delay at the arrival time instead drops the R*Rdot retardation term
+   and smears compact binaries. Invert t = tau + R(tau) by fixed-point
+   iteration: converges geometrically (ratio a1*n << 1), 5 iterations
+   give residuals below 1e-12 s. */
+double tau = t;
+for (int iteration = 0; iteration < 5; iteration++)
+{
+    tau = t - a1 * sin(n * tau - phi);
+}
+
+return t - tau;
 }
 
 
