@@ -240,15 +240,11 @@ void run_elliptical_orbit_search_resampler(
     if (args.verbose) std::cout << "Resampling to elliptical orbit with n=" << n << ", a1=" << a1 << ", phi=" << phi << ", omega=" << omega << ", ecc=" << ecc << "\n";
     TimeDomainResampler resampler;
 
-    if (ecc >= 0.8) {
-        if (args.verbose) std::cout << "Using BT model resampler for high eccentricity orbit\n";
-        resampler.bt_model_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
-    }
-    else {
-        if (args.verbose) std::cout << "Using ELL8 resampler for low eccentricity orbit\n";
-        resampler.ell8_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
-       
-    }
+    /* The ELL8 expansion loses the signal above ecc ~ 0.3 for millisecond
+       pulsars in compact orbits (truncation error ~ e^8 * a1), so always
+       use the BT model resampler. */
+    if (args.verbose) std::cout << "Using BT model resampler\n";
+    resampler.bt_model_resampler(d_tim, d_tim_resampled, n, a1, phi, omega, ecc, tsamp, inverse_tsamp, size);
 }
 
 void exact_resampler_elliptical(
