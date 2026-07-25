@@ -500,8 +500,10 @@ __global__ void resample_circular_kernel(float* input_d,
 void device_circular_orbit_resampler(float * d_idata, float * d_odata, double n, double a1, double phi, double tsamp, double inverse_tsamp,  size_t size, unsigned int max_threads, unsigned int max_blocks)
 {
  
-    /* At t = 0, the n * t term vanishes */
-  double zero_offset = a1 * -1 * sin(phi) * inverse_tsamp;
+    /* Forcing out[0] = in[0] rotates the recovered orbital phase by n*R(0)
+       and shifts the reported T0 by ~R(0). Without the offset,
+       out[j] = in[j + R(j)] resamples exactly to the emission frame. */
+  double zero_offset = 0.0;
 
   unsigned blocks = size/max_threads + 1;
   if (blocks > max_blocks)
@@ -609,7 +611,10 @@ void device_ell8_resampler(float * d_idata, float * d_odata, double n, double a1
     //variable name is sinE for brevity. Mathematically it is sqrt(1-e**2) * sin(E).
     double sinE = s1 * -1 * sin(phi) + s2 * -1 * sin(2 * phi) + s3 * -1 * sin(3 * phi) + s4 * -1 * sin(4 * phi) + s5 * -1 * sin(5 * phi) + s6 * -1 * sin(6 * phi) + s7 * -1 * sin(7 * phi);
 
-    double zero_offset = a1 * (cos(omega) * cosE + sin(omega) * sinE) * inverse_tsamp;
+    /* Forcing out[0] = in[0] rotates the recovered orbital phase by n*R(0)
+       and shifts the reported T0 by ~R(0). Without the offset,
+       out[j] = in[j + R(j)] resamples exactly to the emission frame. */
+    double zero_offset = 0.0;
     unsigned blocks = size/max_threads + 1;
   
     if (blocks > max_blocks)
@@ -689,8 +694,10 @@ while(abs(du_t0) > 1.0e-8)
     du_t0 = (mean_anomaly_t0 - (eccentric_anomaly_t0 - ecc * sin(eccentric_anomaly_t0)))/(1.0 - ecc * cos(eccentric_anomaly_t0));
     eccentric_anomaly_t0+= du_t0;
 }
-//Calculating the roemer delay at t=0 and converting to bins
-double zero_offset = a1  * ((cos(eccentric_anomaly_t0) - ecc) * sin(omega) + sqrt(1 - pow(ecc,2)) * sin(eccentric_anomaly_t0) * cos(omega)) * inverse_tsamp;
+/* Forcing out[0] = in[0] rotates the recovered orbital phase by n*R(0)
+   and shifts the reported T0 by ~R(0). Without the offset,
+   out[j] = in[j + R(j)] resamples exactly to the emission frame. */
+double zero_offset = 0.0;
 
  unsigned blocks = size/max_threads + 1;
  if (blocks > max_blocks)
