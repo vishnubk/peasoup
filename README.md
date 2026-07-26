@@ -263,7 +263,7 @@ so if you build a par file from these values you must barycentre them first.
 
 ### Optional Features
 
-* `--exact_resampler`: Use linear interpolation instead of nearest-neighbor. Both resamplers solve for the emission time, so results agree to ~1%; the nearest-neighbor gather is much faster and is the recommended default. Keep this flag as an independent cross-check.
+* `--exact_resampler`: Use linear interpolation instead of nearest-neighbor. Both resamplers solve for the emission time, so results agree to ~1%; the nearest-neighbor gather is much faster and is the recommended default. You can use this flag if required as an independent cross-check.
 * `--distill_circular_orbit_cands`: Enables candidate filtering in template bank mode (currently off by default).
 
 
