@@ -249,11 +249,16 @@ prepfold -topo -noxwin -p ${xml_period} -dm ${dm} -bin \
          -pb ${xml_pb} -x ${xml_a1} -To ${xml_t0} -w ${xml_omega} -e ${xml_ecc} data.fil
 ```
 
+Warning: prepfold's `-bin` option evaluates the orbital delay at the arrival time
+rather than the emission time, which smears the profile of compact binaries
+(the error grows as f0*a1^2/Pb). For short orbital periods fold with PulsarX,
+or with `prepfold -par` using a tempo par file, instead.
+
 ---
 
 ### Optional Features
 
-* `--exact_resampler`: Use linear interpolation instead of nearest-neighbor. Slower but helpful for known sources.
+* `--exact_resampler`: Use linear interpolation instead of nearest-neighbor. Both resamplers solve for the emission time, so results agree to ~1%; the nearest-neighbor gather is much faster and is the recommended default. Keep this flag as an independent cross-check.
 * `--distill_circular_orbit_cands`: Enables candidate filtering in template bank mode (currently off by default).
 
 
