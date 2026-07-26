@@ -254,6 +254,11 @@ rather than the emission time, which smears the profile of compact binaries
 (the error grows as f0*a1^2/Pb). For short orbital periods fold with PulsarX,
 or with `prepfold -par` using a tempo par file, instead.
 
+Note: peasoup searches topocentric data, so the reported spin frequency, T0 and
+orbital phase are topocentric. Folding the same filterbank with PulsarX or
+prepfold needs no conversion, but tempo par files are barycentric by convention,
+so if you build a par file from these values you must barycentre them first.
+
 ---
 
 ### Optional Features
