@@ -40,6 +40,7 @@ struct CmdLineOptions {
   bool no_search;
   bool distill_circular_orbit_cands;
   bool single_precision_harmonic_sums;
+  bool no_deredden;
   bool exact_resampler;
   std::string keplerian_tb_file;
 
@@ -216,6 +217,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       TCLAP::SwitchArg arg_no_search("", "nosearch", "Do not search while dumping timeseries, no effect otherwise", cmd);
       TCLAP::SwitchArg arg_distill_circular_orbit_cands("", "distill_circular_orbit_cands", "Distill candidates from circular orbit searches", cmd);
       TCLAP::SwitchArg arg_single_precision_harmonic_sums("", "single_precision_harmonic_sums", "Perform harmonic sums with single precision instead of double.", cmd);
+      TCLAP::SwitchArg arg_no_deredden("", "no_deredden", "Skip rednoise removal (running-median whitening) of the Fourier spectrum. The running median rides up onto bright signals whose orbital smear is narrow (Pb >> Tobs), suppressing their S/N before resampling.", cmd);
       TCLAP::SwitchArg arg_exact_resampler("", "exact_resampler", "Run exact resampler using linear interpolation", cmd);
 
 
@@ -261,6 +263,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       args.no_search         = arg_no_search.getValue();
       args.distill_circular_orbit_cands = arg_distill_circular_orbit_cands.getValue();
       args.single_precision_harmonic_sums = arg_single_precision_harmonic_sums.getValue();
+      args.no_deredden = arg_no_deredden.getValue();
       args.exact_resampler   = arg_exact_resampler.getValue();
       args.keplerian_tb_file = arg_keplerian_template_bank_filename.getValue();
 

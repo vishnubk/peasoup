@@ -121,10 +121,14 @@ private:
     r2cfft.execute(d_tim.get_data(), d_fseries.get_data());
     if (args.verbose) std::cout << "Forming power spectrum\n";
     former.form(d_fseries, d_pspec);
-    if (args.verbose) std::cout << "Calculating running median\n";
-    rednoise.calculate_median(d_pspec);
-    if (args.verbose) std::cout << "Dereddening Fourier series\n";
-    rednoise.deredden(d_fseries);
+    if (args.no_deredden) {
+        if (args.verbose) std::cout << "Skipping rednoise removal (--no_deredden)\n";
+    } else {
+        if (args.verbose) std::cout << "Calculating running median\n";
+        rednoise.calculate_median(d_pspec);
+        if (args.verbose) std::cout << "Dereddening Fourier series\n";
+        rednoise.deredden(d_fseries);
+    }
     if (bzap) {
         if (args.verbose) std::cout << "Zapping birdies\n";
         bzap->zap(d_fseries);
